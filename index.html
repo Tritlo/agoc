@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GHC WASM Pong</title>
+
+  <!-- OpenGraph metadata -->
+  <meta property="og:title" content="GHC WASM Pong">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="./preview.png">
+  <meta property="og:description" content="A demo showcasing running Haskell code compiled to WebAssembly using the GHC WASM backend. Functional programming in the browser with full access to JavaScript APIs through FFI.">
+  <meta property="og:site_name" content="GHC WASM Pong">
+  <!-- Load PixiJS (vendored) -->
+  <script src="./vendor/pixi.js@8.0.0/dist/pixi.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #000;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      color: #333;
+    }
+
+    .container {
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      background: black;
+      border: none;
+      box-shadow: none;
+      overflow: hidden;
+    }
+
+    .header {
+      display: none;
+    }
+
+    .header h1 {
+      font-size: 2.5em;
+      margin-bottom: 15px;
+      font-weight: 700;
+    }
+
+    .header p {
+      font-size: 1.1em;
+      line-height: 1.6;
+      margin-bottom: 20px;
+      opacity: 0.95;
+    }
+
+    .header p a {
+      color: white;
+      text-decoration: underline;
+      opacity: 0.9;
+    }
+
+    .header p a:hover {
+      opacity: 1;
+    }
+
+    .github-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: white;
+      text-decoration: none;
+      background: #555;
+      padding: 10px 20px;
+      border: 1px solid #666;
+      transition: background 0.3s ease;
+      font-weight: 500;
+    }
+
+    .github-link:hover {
+      background: #666;
+    }
+
+    .content {
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .status {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border-left: 4px solid #fff;
+      padding: 10px 15px;
+      margin: 0;
+      font-size: 0.9em;
+    }
+
+    .status h2 {
+      font-size: 1em;
+      margin-bottom: 5px;
+      color: white;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .error {
+      background: #f5f5f5;
+      border-left: 4px solid #000;
+      padding: 15px 20px;
+      color: #000;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    @media (max-width: 600px) {
+      .header h1 {
+        font-size: 2em;
+      }
+      .header p {
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>GHC WASM Pong</h1>
+      <p>
+        This demo showcases running Haskell code compiled to WebAssembly using the <a href="https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta" target="_blank" rel="noopener noreferrer">GHC WASM backend</a>.
+        The GHC WASM backend allows you to compile Haskell programs to WebAssembly, enabling functional
+        programming in the browser with full access to JavaScript APIs through FFI, in this case to <a href="https://pixijs.com/" target="_blank" rel="noopener noreferrer">pixi.js</a>.
+      </p>
+      <a href="https://github.com/Tritlo/wasm-game" target="_blank" rel="noopener noreferrer" class="github-link">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+        </svg>
+        View Source on GitHub
+      </a>
+    </div>
+    <div class="content">
+      <div class="status">
+        <h2>Status</h2>
+        <p>Loading WebAssembly module...</p>
+      </div>
+      <div id="canvas-container"></div>
+    </div>
+  </div>
+  <script type="module">
+    import { WASI } from "./vendor/@runno/wasi@0.7.0/dist/wasi.js";
+    import ghc_wasm_jsffi from "./ghc_wasm_jsffi.js";
+
+    // Initialize Steamworks if available (Electron context)
+    let steamworksReady = false;
+
+    if (window.steamworks) {
+      window.steamworks.isInitialized().then(async (initialized) => {
+        steamworksReady = initialized;
+        if (initialized) {
+          console.log('Steamworks initialized');
+          // Example: Get Steam user info
+          window.steamworks.getPersonaName().then((name) => {
+            console.log('Steam user:', name);
+          });
+        } else {
+          console.log('Steamworks not available (Steam may not be running)');
+        }
+      });
+    }
+
+    // Enable gamepad API - required for Electron/Windows
+    // Gamepads need to be activated through user interaction or event listeners
+    window.addEventListener('gamepadconnected', (e) => {
+      console.log('Gamepad connected:', e.gamepad.id);
+    });
+
+    window.addEventListener('gamepaddisconnected', (e) => {
+      console.log('Gamepad disconnected:', e.gamepad.id);
+    });
+
+    // Poll gamepads periodically to ensure they're detected
+    // This is especially important for Electron on Windows
+    setInterval(() => {
+      if (navigator.getGamepads) {
+        navigator.getGamepads();
+      }
+    }, 100);
+
+    // Hide status message after 30 seconds
+    setTimeout(() => {
+      const statusDiv = document.querySelector('.status');
+      if (statusDiv) {
+        statusDiv.style.display = 'none';
+      }
+    }, 30000);
+
+    // Make PIXI available globally for the WASM module
+    window.PIXI = PIXI;
+    window.Application = PIXI.Application;
+    window.Sprite = PIXI.Sprite;
+    window.Assets = PIXI.Assets;
+    window.AnimatedSprite = PIXI.AnimatedSprite;
+    window.HTMLText = PIXI.HTMLText;
+
+    const audio_context = new AudioContext();
+    const master = audio_context.createGain();
+    master.gain.value = 0.9;
+    master.connect(audio_context.destination);
+
+
+    window.blip = (freq = 440, ms = 80, vol = 0.2) => {
+      const oscillator = audio_context.createOscillator();
+      const gain = audio_context.createGain();
+      oscillator.type = "square";
+      oscillator.frequency.setValueAtTime(freq, audio_context.currentTime);
+
+      const t0 = audio_context.currentTime;
+      const attack = 0.002;
+      const release = Math.max(0.01, ms / 1000 - attack);
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(vol, t0 + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + release);
+
+      oscillator.connect(gain).connect(master);
+      oscillator.start(t0);
+      oscillator.stop(t0 + attack + release + 0.02);
+    }
+
+    // Check for WebAssembly support
+    if ("WebAssembly" in window) {
+      const wasi = new WASI({
+        stdout: (out) => console.log("[wasm stdout]", out),
+        stderr: (out) => console.error("[wasm stderr]", out)
+      });
+
+      const jsffiExports = {};
+
+      try {
+        console.log('Creating JSFFI imports...');
+        const jsffiImports = ghc_wasm_jsffi(jsffiExports);
+        console.log('JSFFI imports created:', jsffiImports);
+
+        console.log('Getting WASI import object...');
+        const wasiImports = wasi.getImportObject();
+        console.log('WASI imports:', Object.keys(wasiImports));
+
+        const importObject = Object.assign(
+          { ghc_wasm_jsffi: jsffiImports },
+          wasiImports
+        );
+        console.log('Full import object:', Object.keys(importObject));
+
+        console.log('Fetching and instantiating WASM...');
+        const result = await WebAssembly.instantiateStreaming(
+          fetch('./test.wasm'),
+          importObject
+        );
+
+        console.log('WASM instantiated, result:', result);
+        console.log('Instance:', result.instance);
+
+        if (!result || !result.instance) {
+          throw new Error('Failed to get instance from instantiateStreaming');
+        }
+
+        const instance = result.instance;
+        console.log('Instance exports:', Object.keys(instance.exports));
+
+        // Fill in the jsffiExports with the instance exports for FFI to work
+        Object.assign(jsffiExports, instance.exports);
+        console.log('JSFFI exports filled:', Object.keys(jsffiExports));
+
+        // Initialize the reactor module (instead of start)
+        // wasi.initialize expects the full result object, not just the instance
+        console.log('Initializing WASI...');
+        wasi.initialize(result, {
+          ghc_wasm_jsffi: ghc_wasm_jsffi(jsffiExports)
+        });
+        console.log('WASI initialized');
+
+        // Call the exported main function
+        if (instance.exports.main) {
+          console.log('Calling main...');
+          instance.exports.main();
+        } else {
+          console.log('No main export found in test.wasm.');
+          console.log('Available exports:', Object.keys(instance.exports));
+        }
+        // Update status on success
+        const statusDiv = document.querySelector('.status');
+        if (statusDiv) {
+          statusDiv.innerHTML = '<h2>Status</h2><p>✓ WebAssembly module loaded successfully!</p>';
+        }
+
+        // Hide status after 30 seconds
+        setTimeout(() => {
+          if (statusDiv) {
+            statusDiv.style.display = 'none';
+          }
+        }, 30000);
+      } catch (error) {
+        console.error('Error loading WASM:', error);
+        console.error('Error stack:', error.stack);
+        const contentDiv = document.querySelector('.content');
+        if (contentDiv) {
+          contentDiv.innerHTML += `<div class="error">Error loading WASM: ${error.message}\n${error.stack}</div>`;
+        }
+      }
+    } else {
+      const contentDiv = document.querySelector('.content');
+      if (contentDiv) {
+        contentDiv.innerHTML += '<div class="error">This browser does not support WebAssembly.</div>';
+      }
+    }
+  </script>
+</body>
+</html>

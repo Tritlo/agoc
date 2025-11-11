@@ -1,0 +1,6 @@
+*.hi
+*.o
+dist-newstyle
+*.wasm
+public/*.js
+dist/
