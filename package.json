@@ -1,12 +1,12 @@
 {
-  "name": "gwp",
-  "version": "0.3.0",
+  "name": "agoc",
+  "version": "0.1.0",
   "description": "Haskell WASM game packaged as Electron app with Steamworks support",
   "author": {
     "name": "Matthias Pall Gissurarson",
     "email": "mpg@mpg.is"
   },
-  "homepage": "https://github.com/Tritlo/wasm-game",
+  "homepage": "https://github.com/Tharkun/agoc",
   "main": "electron/main.js",
   "scripts": {
     "vendor:download": "./scripts/vendor-dependencies.sh",
@@ -15,19 +15,15 @@
     "electron:pack": "electron-builder --dir"
   },
   "build": {
-    "appId": "is.mpg.gwp",
-    "productName": "gwp",
+    "appId": "se.tharkun.agoc",
+    "productName": "agoc",
     "directories": {
       "output": "dist",
       "buildResources": "build"
     },
     "files": [
       "electron/**/*",
-      "index.html",
-      "test.wasm",
-      "ghc_wasm_jsffi.js",
-      "assets/**/*",
-      "vendor/**/*",
+      "public/**/*",
       "package.json",
       "steam_appid.txt",
       "node_modules/steamworks.js/**/*"
@@ -55,7 +51,7 @@
       ],
       "category": "Game",
       "maintainer": "Matthias Pall Gissurarson <mpg@mpg.is>",
-      "executableName": "gwp",
+      "executableName": "agoc",
       "extraFiles": [
         {
           "from": "build/run.sh",

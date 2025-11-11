@@ -49,7 +49,7 @@ library
         Lib
 
 
-executable test
+executable agoc
     -- Import common warning flags.
     import:           warnings
 

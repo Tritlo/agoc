@@ -7,7 +7,7 @@ set -e
 echo "=== Building Electron App ==="
 
 # Step 1: Build WASM files (if not already built)
-if [ ! -f "test.wasm" ] || [ ! -f "ghc_wasm_jsffi.js" ]; then
+if [ ! -f "public/agoc.wasm" ] || [ ! -f "public/ghc_wasm_jsffi.js" ]; then
     echo "Building WASM files..."
     ./build-and-copy.sh
 else
@@ -15,7 +15,7 @@ else
 fi
 
 # Step 2: Vendor CDN dependencies
-if [ ! -f "vendor/pixi.js@8.0.0/dist/pixi.min.js" ] || [ ! -f "vendor/@runno/wasi@0.7.0/dist/wasi.js" ]; then
+if [ ! -f "public/vendor/pixi.js@8.0.0/dist/pixi.min.js" ] || [ ! -f "public/vendor/@runno/wasi@0.7.0/dist/wasi.js" ]; then
     echo "Vendoring CDN dependencies..."
     ./scripts/vendor-dependencies.sh
 else
@@ -29,11 +29,11 @@ mkdir -p dist
 echo ""
 echo "=== Building Electron app in Docker ==="
 echo "Building Docker image..."
-docker build -f Dockerfile.electron -t ghc-wasm-pong-electron .
+docker build -f Dockerfile.electron -t agoc-electron .
 
 echo ""
 echo "Running Electron build in Docker container..."
-docker run --rm -v "$(pwd)/dist:/app/dist" ghc-wasm-pong-electron
+docker run --rm -v "$(pwd)/dist:/app/dist" agoc-electron
 
 echo ""
 echo "=== Build Complete ==="

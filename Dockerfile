@@ -104,12 +104,12 @@ RUN source /home/$USER_NAME/.ghc-wasm/env && \
 
 # Generate ghc_wasm_jsffi.js from the compiled wasm file
 RUN source /home/$USER_NAME/.ghc-wasm/env && \
-    WASM_FILE=$(find dist-newstyle -name "test.wasm" -type f | head -n 1) && \
+    WASM_FILE=$(find dist-newstyle -name "agoc.wasm" -type f | head -n 1) && \
     if [ -n "$WASM_FILE" ]; then \
         LIBDIR=$(wasm32-wasi-ghc --print-libdir) && \
         node "$LIBDIR/post-link.mjs" -i "$WASM_FILE" -o /app/ghc_wasm_jsffi.js; \
     else \
-        echo "Warning: test.wasm not found, skipping JSFFI generation"; \
+        echo "Warning: agoc.wasm not found, skipping JSFFI generation"; \
     fi
 
 # Copy the scripts, datasets, tests, and extra files

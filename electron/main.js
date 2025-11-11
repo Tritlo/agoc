@@ -117,7 +117,7 @@ function createWindow() {
   });
 
   // Load the game HTML file
-  const htmlPath = path.join(__dirname, '..', 'index.html');
+  const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
   mainWindow.loadFile(htmlPath);
 
   // Enable gamepad support - Electron requires user interaction to activate gamepads

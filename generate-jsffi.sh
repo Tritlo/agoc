@@ -2,17 +2,17 @@
 # Script to generate ghc_wasm_jsffi.js from the compiled wasm file
 # Usage: ./generate-jsffi.sh [path-to-wasm-file]
 
-WASM_FILE="${1:-dist-newstyle/build/wasm32-wasi/ghc-*/test/x/test/build/test/test.wasm}"
+WASM_FILE="${1:-dist-newstyle/build/wasm32-wasi/ghc-*/test/x/agoc/build/agoc/agoc.wasm}"
 OUTPUT_FILE="ghc_wasm_jsffi.js"
 
 # Find the wasm file if using default path
 if [ ! -f "$WASM_FILE" ]; then
     # Try to find it in dist-newstyle
-    WASM_FILE=$(find dist-newstyle -name "test.wasm" -type f | head -n 1)
+    WASM_FILE=$(find dist-newstyle -name "agoc.wasm" -type f | head -n 1)
 fi
 
 if [ ! -f "$WASM_FILE" ]; then
-    echo "Error: Could not find test.wasm file"
+    echo "Error: Could not find agoc.wasm file"
     echo "Please provide the path to the wasm file as an argument"
     exit 1
 fi

@@ -273,7 +273,7 @@
 
         console.log('Fetching and instantiating WASM...');
         const result = await WebAssembly.instantiateStreaming(
-          fetch('./test.wasm'),
+          fetch('./agoc.wasm'),
           importObject
         );
 
@@ -304,7 +304,7 @@
           console.log('Calling main...');
           instance.exports.main();
         } else {
-          console.log('No main export found in test.wasm.');
+          console.log('No main export found in agoc.wasm.');
           console.log('Available exports:', Object.keys(instance.exports));
         }
         // Update status on success

@@ -41,11 +41,7 @@ RUN mkdir -p "$ELECTRON_CACHE" "$ELECTRON_BUILDER_CACHE"
 
 # Copy application files (needed for electron-builder to run)
 COPY electron/ ./electron/
-COPY index.html ./
-COPY test.wasm ./
-COPY ghc_wasm_jsffi.js ./
-COPY vendor/ ./vendor/
-COPY assets/ ./assets/
+COPY public/ ./public/
 COPY steam_appid.txt ./
 COPY build/run.sh ./build/run.sh
 
