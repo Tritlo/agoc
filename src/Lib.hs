@@ -55,11 +55,11 @@ foreign import javascript unsafe "new PIXI.Text({text: $1, style: {fill: $2 }})"
 -- @param backgroundColor The background color as a JavaScript string (e.g., "0x000000")
 -- @return The initialized application object
 foreign import javascript safe
- """
+   """
   const r = await $1.init({background: $2, resizeTo: window, preference: "webgl"});
   return $1
- """
- initApp :: PixiApp -> JSString -> IO PixiApp
+   """
+   initApp :: PixiApp -> JSString -> IO PixiApp
 
 -- | Initializes a PIXI.js Application with the given background color and resizes it to a target element.
 --

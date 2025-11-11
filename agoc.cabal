@@ -1,11 +1,11 @@
 cabal-version:      3.14
-name:               test
-version:            0.3.0.0
-synopsis:           Haskell wasm test
+name:               agoc
+version:            0.1.0.0
+synopsis:           A Game of Chance
 
 -- A longer description of the package.
 description:
-    This is a test package for the Haskell wasm toolchain.
+    This is a game of chance implemented in Haskell and compiled to WebAssembly using the GHC WASM backend.
 -- The license under which the package is released.
 license:            MIT
 
@@ -30,11 +30,11 @@ extra-doc-files:    CHANGELOG.md
 extra-source-files:
     README.md
 
-homepage:       https://github.mpg.is/wasm-game
+homepage:       https://git.tharkun.se/agoc
 
 source-repository head
   type:     git
-  location: https://github.com/Tritlo/wasm-game.git
+  location: https://github.com/Tharkun/agoc.git
 
 common warnings
     ghc-options: -Wall
@@ -54,7 +54,7 @@ executable agoc
     import:           warnings
 
     -- .hs or .lhs file containing the Main module.
-    main-is:          Test.hs
+    main-is:          App.hs
 
     -- Modules included in this executable, other than Main.
     -- other-modules:
@@ -65,7 +65,9 @@ executable agoc
     -- Other library packages from which modules are imported.
     build-depends:
         base,
-        test,
+        agoc,
+        splitmix,
+        splitmix-distributions,
         ghc-experimental
     -- Directories containing source files.
     hs-source-dirs:   app
