@@ -75,12 +75,11 @@ RUN curl -fsSL https://get-ghcup.haskell.org -o /tmp/get-ghcup.sh && \
 # rebuilding the dependencies all the time.
 COPY --parents --chown=${UID}:${GID} *.cabal /app/
 COPY --chown=${UID}:${GID} cabal.project /app/cabal.project
+COPY --chown=${UID}:${GID} cabal.project.local /app/cabal.project.local
 
 WORKDIR /app
 # Using the cabal files, we can build the dependencies
-RUN echo "packages: *.cabal" > /app/cabal.project.local &&\
-    # We enable the bundled zlib, as it is more likely to work across different systems
-    cabal update && \
+RUN cabal update && \
     source /home/$USER_NAME/.ghc-wasm/env && \
     cabal --with-compiler=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc \
           --with-hc-pkg=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc-pkg \

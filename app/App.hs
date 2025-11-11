@@ -13,7 +13,7 @@ import GHC.Wasm.Prim
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
 import Control.Monad (when)
-import qualified System.Random.SplitMix.Distribution as D
+import qualified System.Random.SplitMix.Distributions as D
 
 -- Export the actual initialization function
 foreign export javascript "main" main :: IO ()
@@ -467,7 +467,7 @@ setupScoreDisplay app screen_width initial_score = do
 setupStartMessage :: JSVal -> Int -> Int -> JSVal -> IO JSVal
 setupStartMessage app screen_width screen_height game_ticker = do
     let s = D.sample 1234 $ D.normal 0.0 1.0
-    start_text <- newText ("Click to start: " ++ show s) "white"
+    start_text <- newText (toJSString $ "Click to start: " ++ show s) "white"
     setProperty "eventMode" start_text (stringAsVal "static")
     setAnchor start_text 0.5
     setProperty "x" start_text (floatAsVal $ fromIntegral screen_width / 2.0)
@@ -537,7 +537,7 @@ main = do
     -- Add ball rotation effect
     addTicker app =<< jsFuncFromHs_ (rotateSprite sprite)
 
-    -- Setup UI elements
+    -- Setuick UI elements
     _fps_counter <- setupFPSCounter app
     score_text <- setupScoreDisplay app screen_width initial_score
 
