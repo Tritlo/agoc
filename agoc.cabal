@@ -68,6 +68,7 @@ executable agoc
         agoc,
         splitmix,
         splitmix-distributions,
+        containers,
         ghc-experimental
     -- Directories containing source files.
     hs-source-dirs:   app

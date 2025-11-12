@@ -59,6 +59,10 @@ foreign import javascript unsafe "$1.lineStyle($2, $3)"
 foreign import javascript unsafe "$1.drawRect($2, $3, $4, $5)"
     drawRect :: PixiGraphics -> Int -> Int -> Int -> Int -> IO ()
 
+
+foreign import javascript unsafe "window[$1] = $2"
+  exportValue :: JSString -> JSVal -> IO ()
+
 -- | Initializes a PIXI.js Application with the given background color.
 --
 -- This function uses a safe import because it needs to await the result of
@@ -164,8 +168,8 @@ foreign import javascript unsafe "window[$1] = $2"
 --
 -- @param textureName The name of the texture (e.g., "WHITE")
 -- @return The texture object
-foreign import javascript unsafe "PIXI.Texture[$1]"
-   baseTexture :: JSString -> IO JSVal
+foreign import javascript unsafe "PIXI.Texture['WHITE']"
+   whiteTexture :: JSString -> IO PixiTexture
 
 -- | Plays a default blip sound effect.
 --
