@@ -134,8 +134,16 @@ histogram num_samples bins dists = do
 simplifyDists :: Seq Dist -> Seq Dist
 simplifyDists dists = dists
 
-updateScore :: IORef GameState -> PixiText -> PixiText -> PixiText -> IO ()
-updateScore game_state_ref score_text target_text distr_text = do
+histogram_options :: HistogramOptions
+histogram_options = defaultHistogramOptions {
+    ho_width = 600,
+    ho_height = 400,
+    ho_fillColor = "black",
+    ho_backgroundColor = "white"
+}
+
+updateScore :: IORef GameState -> PixiText -> PixiText -> PixiText -> PixiSprite -> IO ()
+updateScore game_state_ref score_text target_text distr_text histogram_sprite = do
     game_state@GameState{..} <- readIORef game_state_ref
     sample <- D.sampleIO $ sampleDists gs_dists
 
@@ -147,8 +155,12 @@ updateScore game_state_ref score_text target_text distr_text = do
         let new_dists = gs_dists :|> Normal 500.0 100.0
         setProperty "text" target_text (stringAsVal $ toJSString $ "Target: " ++ show (new_target))
         setProperty "text" distr_text (stringAsVal $ toJSString $ "X ~ " ++ showDists new_dists)
-        Histogram histogram <- histogram 10_000 10 new_dists
-        consoleLogShow (show histogram)
+
+        Histogram histogram <- histogram 10_000 100 new_dists
+        histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
+        histogram_texture <- histogram_plot histogram_data histogram_options
+        setProperty "texture" histogram_sprite histogram_texture
+
         writeIORef game_state_ref (game_state { gs_score = 0, gs_target = new_target, gs_dists = new_dists })
     else
         writeIORef game_state_ref (game_state { gs_score = new_score })
@@ -185,18 +197,16 @@ main = do
     setAnchor distr_text 0.5
     addChild app distr_text
 
-    Histogram histogram <- histogram 10_000 10 dists
-    consoleLogShow (show histogram)
-    let (max_x, max_y) = (fromIntegral $ maximum $ map fst histogram, maximum $ map snd histogram)
+    Histogram histogram <- histogram 10_000 100 dists
 
-    parsed_histogram <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
-    histogram_texture <- histogram_plot 200 200 max_x max_y "black" "white" parsed_histogram
+    histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
+    histogram_texture <- histogram_plot histogram_data histogram_options
 
-    sprite <- newSprite histogram_texture
-    setProperty "x" sprite (floatAsVal $ fromIntegral screen_width / 2.0)
-    setProperty "y" sprite (floatAsVal 200.0)
-    setAnchor sprite 0.5
-    addChild app sprite
+    histogram_sprite <- newSprite histogram_texture
+    setProperty "x" histogram_sprite (floatAsVal $ fromIntegral screen_width / 2.0)
+    setProperty "y" histogram_sprite (floatAsVal 200.0)
+    setAnchor histogram_sprite 0.5
+    addChild app histogram_sprite
 
 
     let sample_button = Button {
@@ -208,7 +218,7 @@ main = do
         button_color = "black",
         button_on_click =
              \event ->
-                updateScore game_state_ref score_text target_text distr_text
+                updateScore game_state_ref score_text target_text distr_text histogram_sprite
     }
     consoleLogShow "rendering button"
     renderButton app sample_button

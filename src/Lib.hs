@@ -1,4 +1,5 @@
 {-# LANGUAGE MultilineStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | WebAssembly/JavaScript FFI bindings for PIXI.js
 --
 -- This module provides Haskell bindings to interact with PIXI.js, a 2D WebGL
@@ -68,96 +69,197 @@ foreign import javascript safe
  const offscreen = new OffscreenCanvas($1, $2);
  const context = offscreen.getContext("2d");
 
+ const data = $18;
+
+ // Calculate min/max from data for better scaling
+ let minX = Infinity, maxX = -Infinity;
+ let maxY = 0;
+ for (const [count, cutoff] of data) {
+   if (cutoff < minX) minX = cutoff;
+   if (cutoff > maxX) maxX = cutoff;
+   if (count > maxY) maxY = count;
+ }
+
+ // Add padding to domains using configurable factors
+ const xPadding = (maxX - minX) * $11;
+ const yPadding = maxY * $12;
+ const xMin = Math.max(0, minX - xPadding);
+ const xMax = maxX + xPadding;
+ const yMin = 0;
+ const yMax = maxY + yPadding;
+
+ // Use configurable margins
+ const marginLeft = $7;
+ const marginRight = $8;
+ const marginTop = $9;
+ const marginBottom = $10;
+ const plotWidth = $1 - marginLeft - marginRight;
+ const plotHeight = $2 - marginTop - marginBottom;
+
  // d3 scales: x (cutoff), y (count)
- const xScale = d3.scaleLinear().domain([0, $3]).range([40, $1 - 20]); // leave margin for y-axis labels
- const yScale = d3.scaleLinear().domain([0, $4]).range([$2 - 40, 20]); // invert y axis and margin for x-axis label
+ const xScale = d3.scaleLinear().domain([xMin, xMax]).range([marginLeft, $1 - marginRight]);
+ const yScale = d3.scaleLinear().domain([yMin, yMax]).range([$2 - marginBottom, marginTop]);
 
- const data = $7;
-
- // Fill background
- context.fillStyle = $6;
+ // Fill background with configurable color
+ context.fillStyle = $4;
  context.fillRect(0, 0, $1, $2);
 
- // Axes styling
- context.strokeStyle = "#222";
- context.lineWidth = 2;
+ // Axes styling with configurable color
+ context.strokeStyle = $5;
+ context.lineWidth = 1.5;
  context.beginPath();
  // Y axis
- context.moveTo(40, 20);
- context.lineTo(40, $2 - 40);
+ context.moveTo(marginLeft, marginTop);
+ context.lineTo(marginLeft, $2 - marginBottom);
  // X axis
- context.lineTo($1 - 20, $2 - 40);
+ context.lineTo($1 - marginRight, $2 - marginBottom);
  context.stroke();
 
  // Draw y axis ticks and labels
- context.fillStyle = "#222";
- context.font = "14px sans-serif";
+ context.fillStyle = $5;
+ context.font = "12px sans-serif";
  context.textAlign = "right";
  context.textBaseline = "middle";
- const numTicks = 5;
- for (let i = 0; i <= numTicks; ++i) {
-   const yValue = i * $4 / numTicks;
+ const numYTicks = $14;
+ for (let i = 0; i <= numYTicks; ++i) {
+   const yValue = yMin + (i * (yMax - yMin) / numYTicks);
    const y = yScale(yValue);
    context.beginPath();
-   context.moveTo(36, y);
-   context.lineTo(40, y);
+   context.moveTo(marginLeft - 4, y);
+   context.lineTo(marginLeft, y);
    context.stroke();
-   context.fillText(Math.round(yValue), 35, y);
+   context.fillText(Math.round(yValue).toString(), marginLeft - 8, y);
  }
 
  // Draw x axis ticks and labels
  context.textAlign = "center";
  context.textBaseline = "top";
- for (let i = 0; i <= numTicks; ++i) {
-   const xValue = i * $3 / numTicks;
+ const numXTicks = $13;
+ for (let i = 0; i <= numXTicks; ++i) {
+   const xValue = xMin + (i * (xMax - xMin) / numXTicks);
    const x = xScale(xValue);
    context.beginPath();
-   context.moveTo(x, $2 - 36);
-   context.lineTo(x, $2 - 40);
+   context.moveTo(x, $2 - marginBottom);
+   context.lineTo(x, $2 - marginBottom + 4);
    context.stroke();
-   context.fillText(Math.round(xValue), x, $2 - 34);
+   context.fillText(Math.round(xValue).toString(), x, $2 - marginBottom + 8);
  }
 
- // Draw axis labels
- context.save();
- context.font = "bold 16px sans-serif";
- context.fillStyle = "#222";
- // y axis label
- context.save();
- context.translate(12, $2/2);
- context.rotate(-Math.PI/2);
- context.textAlign = "center";
- context.textBaseline = "top";
- context.fillText("Count", 0, 0);
- context.restore();
- // x axis label
- context.textAlign = "center";
- context.textBaseline = "bottom";
- context.fillText("Cutoff", $1/2, $2 - 4);
- context.restore();
+ // Calculate bin width from first two bins (if available)
+ let binWidth = plotWidth / data.length;
+ if (data.length > 1) {
+   binWidth = xScale(data[1][1]) - xScale(data[0][1]);
+ }
 
- // Determine bar width: use the bin count
- const bar_width = ($1 - 60) / data.length; // fit bars inside axes
-
- // Draw histogram bars
- context.fillStyle = $5;
+ // Draw histogram bars with configurable styling
+ context.fillStyle = $3;
+ context.strokeStyle = $6;
+ context.lineWidth = 0.5;
+ const barSpacingFactor = $17;
  for (const [count, cutoff] of data) {
-    // cutoff is the left edge of the bin
-    const x = xScale(cutoff) - bar_width/2;
-    const y = yScale(count);
-    const height = ($2 - 40) - y; // from bar top to x-axis
-    context.fillRect(x, y, bar_width, height);
+   if (count > 0) {
+     const x = xScale(cutoff);
+     const y = yScale(count);
+     const height = ($2 - marginBottom) - y;
+     // Draw bar with configurable spacing
+     const barWidth = Math.max(1, binWidth * barSpacingFactor);
+     const barX = x - barWidth / 2;
+     context.fillRect(barX, y, barWidth, height);
+     // Add subtle border for definition
+     if (barWidth > 2) {
+       context.strokeRect(barX, y, barWidth, height);
+     }
+   }
  }
  return PIXI.Texture.from(offscreen);
  """
- histogram_plot :: Int -- ^ width $1
+ histogram_plot_ffi :: Int -- ^ width $1
                 -> Int -- ^ height $2
-                -> Double -- ^ max x value $3
-                -> Double -- ^ max y value $4
-                -> JSString -- ^ fill color $5
-                -> JSString -- ^ background color $6
-                -> JSVal -- ^ data $7
+                -> JSString -- ^ fill color $3
+                -> JSString -- ^ background color $4
+                -> JSString -- ^ axis color $5
+                -> JSString -- ^ bar border color $6
+                -> Int -- ^ margin left $7
+                -> Int -- ^ margin right $8
+                -> Int -- ^ margin top $9
+                -> Int -- ^ margin bottom $10
+                -> Double -- ^ x padding factor $11
+                -> Double -- ^ y padding factor $12
+                -> Int -- ^ num x ticks $13
+                -> Int -- ^ num y ticks $14
+                -> JSString -- ^ x axis label $15
+                -> JSString -- ^ y axis label $16
+                -> Double -- ^ bar spacing factor $17
+                -> JSVal -- ^ data $18
                 -> IO PixiTexture
+
+-- | Options for customizing histogram plot appearance
+data HistogramOptions = HistogramOptions {
+    ho_width :: Int,              -- ^ Plot width in pixels
+    ho_height :: Int,              -- ^ Plot height in pixels
+    ho_fillColor :: JSString,      -- ^ Bar fill color (e.g., "black", "#FF0000")
+    ho_backgroundColor :: JSString, -- ^ Background color (e.g., "white", "#FFFFFF")
+    ho_axisColor :: JSString,      -- ^ Axis and tick color (default: "#333")
+    ho_barBorderColor :: JSString, -- ^ Bar border color (default: "#fff")
+    ho_marginLeft :: Int,          -- ^ Left margin in pixels (default: 50)
+    ho_marginRight :: Int,         -- ^ Right margin in pixels (default: 20)
+    ho_marginTop :: Int,           -- ^ Top margin in pixels (default: 20)
+    ho_marginBottom :: Int,        -- ^ Bottom margin in pixels (default: 40)
+    ho_xPaddingFactor :: Double,   -- ^ X-axis padding as fraction of range (default: 0.05)
+    ho_yPaddingFactor :: Double,   -- ^ Y-axis padding as fraction of max (default: 0.05)
+    ho_numXTicks :: Int,           -- ^ Number of x-axis ticks (default: 8)
+    ho_numYTicks :: Int,           -- ^ Number of y-axis ticks (default: 6)
+    ho_xAxisLabel :: JSString,     -- ^ X-axis label (default: "Cutoff")
+    ho_yAxisLabel :: JSString,     -- ^ Y-axis label (default: "Count")
+    ho_barSpacingFactor :: Double  -- ^ Bar width as fraction of bin width (default: 0.9)
+}
+
+-- | Default histogram options
+defaultHistogramOptions :: HistogramOptions
+defaultHistogramOptions = HistogramOptions {
+    ho_width = 600,
+    ho_height = 400,
+    ho_fillColor = "black",
+    ho_backgroundColor = "white",
+    ho_axisColor = "#333",
+    ho_barBorderColor = "#fff",
+    ho_marginLeft = 50,
+    ho_marginRight = 20,
+    ho_marginTop = 20,
+    ho_marginBottom = 40,
+    ho_xPaddingFactor = 0.05,
+    ho_yPaddingFactor = 0.05,
+    ho_numXTicks = 8,
+    ho_numYTicks = 6,
+    ho_xAxisLabel = "Cutoff",
+    ho_yAxisLabel = "Count",
+    ho_barSpacingFactor = 0.9
+}
+
+
+-- | Plot a histogram with the given options
+histogram_plot :: JSVal -> HistogramOptions -> IO PixiTexture
+histogram_plot histogram opts = do
+    histogram_plot_ffi
+        (ho_width opts)
+        (ho_height opts)
+        (ho_fillColor opts)
+        (ho_backgroundColor opts)
+        (ho_axisColor opts)
+        (ho_barBorderColor opts)
+        (ho_marginLeft opts)
+        (ho_marginRight opts)
+        (ho_marginTop opts)
+        (ho_marginBottom opts)
+        (ho_xPaddingFactor opts)
+        (ho_yPaddingFactor opts)
+        (ho_numXTicks opts)
+        (ho_numYTicks opts)
+        (ho_xAxisLabel opts)
+        (ho_yAxisLabel opts)
+        (ho_barSpacingFactor opts)
+        histogram
+
 
 
 foreign import javascript unsafe "JSON.parse($1)"
