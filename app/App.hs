@@ -77,7 +77,8 @@ main = do
         button_height = 100.0,
         button_color = "white",
         button_on_click =
-             \event -> do updateScore game_state_ref score_text
+             \event ->
+                updateScore game_state_ref score_text
     }
     consoleLogShow "rendering button"
     renderButton app sample_button
