@@ -63,6 +63,115 @@ foreign import javascript unsafe "$1.drawRect($2, $3, $4, $5)"
 foreign import javascript unsafe "window[$1] = $2"
   exportValue :: JSString -> JSVal -> IO ()
 
+foreign import javascript safe
+ """
+ const offscreen = new OffscreenCanvas($1, $2);
+ const context = offscreen.getContext("2d");
+
+ // d3 scales: x (cutoff), y (count)
+ const xScale = d3.scaleLinear().domain([0, $3]).range([40, $1 - 20]); // leave margin for y-axis labels
+ const yScale = d3.scaleLinear().domain([0, $4]).range([$2 - 40, 20]); // invert y axis and margin for x-axis label
+
+ const data = $7;
+
+ // Fill background
+ context.fillStyle = $6;
+ context.fillRect(0, 0, $1, $2);
+
+ // Axes styling
+ context.strokeStyle = "#222";
+ context.lineWidth = 2;
+ context.beginPath();
+ // Y axis
+ context.moveTo(40, 20);
+ context.lineTo(40, $2 - 40);
+ // X axis
+ context.lineTo($1 - 20, $2 - 40);
+ context.stroke();
+
+ // Draw y axis ticks and labels
+ context.fillStyle = "#222";
+ context.font = "14px sans-serif";
+ context.textAlign = "right";
+ context.textBaseline = "middle";
+ const numTicks = 5;
+ for (let i = 0; i <= numTicks; ++i) {
+   const yValue = i * $4 / numTicks;
+   const y = yScale(yValue);
+   context.beginPath();
+   context.moveTo(36, y);
+   context.lineTo(40, y);
+   context.stroke();
+   context.fillText(Math.round(yValue), 35, y);
+ }
+
+ // Draw x axis ticks and labels
+ context.textAlign = "center";
+ context.textBaseline = "top";
+ for (let i = 0; i <= numTicks; ++i) {
+   const xValue = i * $3 / numTicks;
+   const x = xScale(xValue);
+   context.beginPath();
+   context.moveTo(x, $2 - 36);
+   context.lineTo(x, $2 - 40);
+   context.stroke();
+   context.fillText(Math.round(xValue), x, $2 - 34);
+ }
+
+ // Draw axis labels
+ context.save();
+ context.font = "bold 16px sans-serif";
+ context.fillStyle = "#222";
+ // y axis label
+ context.save();
+ context.translate(12, $2/2);
+ context.rotate(-Math.PI/2);
+ context.textAlign = "center";
+ context.textBaseline = "top";
+ context.fillText("Count", 0, 0);
+ context.restore();
+ // x axis label
+ context.textAlign = "center";
+ context.textBaseline = "bottom";
+ context.fillText("Cutoff", $1/2, $2 - 4);
+ context.restore();
+
+ // Determine bar width: use the bin count
+ const bar_width = ($1 - 60) / data.length; // fit bars inside axes
+
+ // Draw histogram bars
+ context.fillStyle = $5;
+ for (const [count, cutoff] of data) {
+    // cutoff is the left edge of the bin
+    const x = xScale(cutoff) - bar_width/2;
+    const y = yScale(count);
+    const height = ($2 - 40) - y; // from bar top to x-axis
+    context.fillRect(x, y, bar_width, height);
+ }
+ return PIXI.Texture.from(offscreen);
+ """
+ histogram_plot :: Int -- ^ width $1
+                -> Int -- ^ height $2
+                -> Double -- ^ max x value $3
+                -> Double -- ^ max y value $4
+                -> JSString -- ^ fill color $5
+                -> JSString -- ^ background color $6
+                -> JSVal -- ^ data $7
+                -> IO PixiTexture
+
+
+foreign import javascript unsafe "JSON.parse($1)"
+ parseJSON :: JSString -> IO JSVal
+
+foreign import javascript safe
+ """
+ const graphics = new PIXI.Graphics();
+ await graphics.svg($1);
+ return graphics;
+ """
+  loadSVG :: JSString -> IO PixiGraphics
+
+
 -- | Initializes a PIXI.js Application with the given background color.
 --
 -- This function uses a safe import because it needs to await the result of

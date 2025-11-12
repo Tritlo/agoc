@@ -69,6 +69,10 @@ executable agoc
         splitmix,
         splitmix-distributions,
         containers,
+        aeson,
+        microlens,
+        microlens-aeson,
+        bytestring,
         ghc-experimental
     -- Directories containing source files.
     hs-source-dirs:   app

@@ -8,6 +8,8 @@ echo "Vendoring CDN dependencies..."
 # Create vendor directory structure
 mkdir -p public/vendor/pixi.js@8.0.0/dist
 mkdir -p public/vendor/@runno/wasi@0.7.0/dist
+mkdir -p public/vendor/plot/
+mkdir -p public/vendor/d3/
 
 # Download PIXI.js
 echo "Downloading PIXI.js..."
@@ -16,6 +18,13 @@ curl -f -L https://cdn.jsdelivr.net/npm/pixi.js@8.0.0/dist/pixi.min.js -o public
 # Download @runno/wasi
 echo "Downloading @runno/wasi..."
 curl -f -L https://cdn.jsdelivr.net/npm/@runno/wasi@0.7.0/dist/wasi.js -o public/vendor/@runno/wasi@0.7.0/dist/wasi.js
+
+# Download Plot
+curl -f -L https://observablehq.com/plot/plot.min.js -o public/vendor/plot/plot.min.js
+
+# Download D3
+curl -f -L https://observablehq.com/plot/d3.min.js -o public/vendor/d3/d3.min.js
+
 
 # Verify downloads
 if [ ! -f "public/vendor/pixi.js@8.0.0/dist/pixi.min.js" ]; then
@@ -28,5 +37,16 @@ if [ ! -f "public/vendor/@runno/wasi@0.7.0/dist/wasi.js" ]; then
     exit 1
 fi
 
+if [ ! -f "public/vendor/plot/plot.min.js" ]; then
+    echo "Error: Failed to download Plot"
+    exit 1
+fi
+
+if [ ! -f "public/vendor/d3/d3.min.js" ]; then
+    echo "Error: Failed to download D3"
+    exit 1
+fi
+
 echo "✓ Successfully vendored all dependencies"
 ls -lh public/vendor/pixi.js@8.0.0/dist/pixi.min.js public/vendor/@runno/wasi@0.7.0/dist/wasi.js
+ls -lh public/vendor/plot/plot.min.js public/vendor/d3/d3.min.js

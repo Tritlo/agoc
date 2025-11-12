@@ -13,6 +13,7 @@
   <meta property="og:site_name" content="AGoC">
   <!-- Load PixiJS (vendored) -->
   <script src="./vendor/pixi.js@8.0.0/dist/pixi.min.js"></script>
+  <script src="./vendor/d3/d3.min.js"></script>
 
   <style>
     * {
@@ -88,7 +89,6 @@
 
     // Make PIXI available globally for the WASM module
     window.PIXI = PIXI;
-
     const audio_context = new AudioContext();
     const master = audio_context.createGain();
     master.gain.value = 0.9;

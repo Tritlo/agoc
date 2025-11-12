@@ -13,6 +13,10 @@ import Control.Monad (when)
 import qualified System.Random.SplitMix.Distributions as D
 import Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
+import Data.Aeson (ToJSON(..))
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy.Char8 as BSC
+import Data.List (partition)
 
 -- Export the actual initialization function
 foreign export javascript "main" main :: IO ()
@@ -53,59 +57,30 @@ data GameState = GameState {
 
 
 data Dist = Uniform {low :: Double, high :: Double}
-          | Beta {alpha :: Double, beta :: Double}
           | Exponential {lambda :: Double}
           | Gamma {k :: Double, theta :: Double}
           | Normal {mean :: Double, stddev :: Double}
-          | Bernoulli {p :: Double}
-          | Binomial {n :: Int, p :: Double}
-          | Poisson {lambda :: Double}
-  deriving (Eq)
--- Note Beta(1,1) is Uniform(0,1)
--- Note Gamma(1,1) is Exponential(1)
--- Note Binomial(1,p) is Bernoulli(p)
+  deriving (Eq, Ord)
 
 instance Show Dist where
-    show (Uniform a b) = "U(a=" ++ show a ++ ", b=" ++ show b ++ ")"
-    show (Beta a b) = "Beta(α=" ++ show a ++ ", β=" ++ show b ++ ")"
+    show (Uniform a b) = "𝒰([" ++ show a ++ ", " ++ show b ++ "])"
     show (Exponential lambda) = "Exp(λ=" ++ show lambda ++ ")"
-    show (Gamma k theta) = "Gamma(k=" ++ show k ++ ", θ=" ++ show theta ++ ")"
-    show (Normal mean stddev) = "N(μ=" ++ show mean ++ ", σ=" ++ show stddev ++ ")"
-    show (Bernoulli p) = "Bern(p=" ++ show p ++ ")"
-    show (Binomial n p) = "Bin(n=" ++ show n ++ ", p=" ++ show p ++ ")"
-    show (Poisson lambda) = "Poisson(λ=" ++ show lambda ++ ")"
+    show (Gamma k theta) = "Γ(k=" ++ show k ++ ", θ=" ++ show theta ++ ")"
+    show (Normal mean stddev) = "𝒩(μ=" ++ show mean ++ ", σ²=" ++ show stddev ++ ")"
 
-instance Eq Dist where
-    (Uniform a b) == (Uniform c d) = a == c && b == d
-    (Beta a b) == (Beta c d) = a == c && b == d
-    (Exponential lambda) == (Exponential lambda') = lambda == lambda'
-    (Gamma k theta) == (Gamma k' theta') = k == k' && theta == theta'
-    (Normal mean stddev) == (Normal mean' stddev') = mean == mean' && stddev == stddev'
-    (Bernoulli p) == (Bernoulli p') = p == p'
-    (Binomial n p) == (Binomial n' p') = n == n' && p == p'
-    (Poisson lambda) == (Poisson lambda') = lambda == lambda'
 
 validateDist :: Dist -> Bool
 validateDist (Uniform a b) = a < b
-validateDist (Beta a b) = a > 0 && b > 0
 validateDist (Exponential lambda) = lambda > 0
 validateDist (Gamma k theta) = k > 0 && theta > 0
 validateDist (Normal mean stddev) = stddev > 0
-validateDist (Bernoulli p) = p >= 0 && p <= 1
-validateDist (Binomial n p) = n > 0 && p >= 0 && p <= 1
-validateDist (Poisson lambda) = lambda > 0
 
 
 sampleDist :: Monad m => Dist -> D.GenT m Double
 sampleDist (Uniform low high) = D.uniformR low high
-sampleDist (Beta alpha beta) = D.beta alpha beta
 sampleDist (Exponential theta) = D.exponential theta
 sampleDist (Gamma k theta) = D.gamma k theta
 sampleDist (Normal mean stddev) = D.normal mean stddev
-sampleDist (Bernoulli p) = (\b -> if b then 1.0 else 0.0) <$> D.bernoulli p
-sampleDist (Binomial n p) = do
-    maybe 0.0 (fromIntegral . sum) <$> D.multinomial n (replicate n p)
-sampleDist (Poisson lambda) = fromIntegral <$> poisson lambda
 
 sampleDists :: Monad m => Seq Dist -> D.GenT m Double
 sampleDists dists = do
@@ -131,6 +106,29 @@ poisson lambda = go 0 0
           then return k
           else go t' (k + 1)
 
+newtype Histogram = Histogram [(Int, Double)]
+
+instance ToJSON Histogram where
+    toJSON (Histogram bins) = toJSON bins
+
+histogram :: Int -> Int -> Seq Dist -> IO Histogram
+histogram num_samples bins dists = do
+    samples <- D.samplesIO num_samples $ sampleDists dists
+    let (h_min, h_max) = (minimum samples, maximum samples)
+    let bin_width = (h_max - h_min) / fromIntegral bins
+    let bins' :: Double -> Double -> [Double] -> [(Int, Double)]
+        bins' !acc !h_cutoff [] = []
+        bins' !acc !h_cutoff !samples =
+            let (lt, rest) = partition (<= h_cutoff) samples
+                len_lt = length lt
+                acc' = acc + (fromIntegral len_lt)
+                h_cutoff' = h_cutoff + bin_width
+            in  (len_lt, h_cutoff) : bins' acc' h_cutoff' rest
+        bins = bins' 0.0 (h_min  + bin_width) samples
+    return (Histogram bins)
+
+
+
 -- | Todo: here we should simplify the distributions by combining like terms,
 -- e.g. N(500,100) + N(500,100) -> N(1000,200)
 simplifyDists :: Seq Dist -> Seq Dist
@@ -148,7 +146,9 @@ updateScore game_state_ref score_text target_text distr_text = do
         let new_target = gs_target * 2
         let new_dists = gs_dists :|> Normal 500.0 100.0
         setProperty "text" target_text (stringAsVal $ toJSString $ "Target: " ++ show (new_target))
-        setProperty "text" distr_text (stringAsVal $ toJSString $ "X ~ " ++ showDists (Seq.fromList [Normal 500.0 100.0]))
+        setProperty "text" distr_text (stringAsVal $ toJSString $ "X ~ " ++ showDists new_dists)
+        Histogram histogram <- histogram 10_000 10 new_dists
+        consoleLogShow (show histogram)
         writeIORef game_state_ref (game_state { gs_score = 0, gs_target = new_target, gs_dists = new_dists })
     else
         writeIORef game_state_ref (game_state { gs_score = new_score })
@@ -161,9 +161,10 @@ main = do
     screen <- getProperty "screen" app
     screen_width <- valAsInt <$> getProperty "width" screen
     screen_height <- valAsInt <$> getProperty "height" screen
+    let dists = Seq.fromList [Normal 500.0 100.0]
     game_state_ref <- newIORef GameState {
                              gs_score = 0,
-                             gs_dists = Seq.fromList [Normal 500.0 100.0],
+                             gs_dists = dists,
                              gs_target = 10_000
                          }
     target_text <- newText (toJSString "Target: 10000") "black"
@@ -178,11 +179,25 @@ main = do
     setAnchor score_text 0.5
     addChild app score_text
 
-    distr_text <- newText (toJSString $ "X ~ " ++ showDists (Seq.fromList [Normal 500.0 100.0])) "black"
+    distr_text <- newText (toJSString $ "X ∼ " ++ showDists dists) "black"
     setProperty "x" distr_text (floatAsVal $ fromIntegral screen_width / 2.0)
     setProperty "y" distr_text (floatAsVal $ (fromIntegral screen_height / 2.0) + 100.0)
     setAnchor distr_text 0.5
     addChild app distr_text
+
+    Histogram histogram <- histogram 10_000 10 dists
+    consoleLogShow (show histogram)
+    let (max_x, max_y) = (fromIntegral $ maximum $ map fst histogram, maximum $ map snd histogram)
+
+    parsed_histogram <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
+    histogram_texture <- histogram_plot 200 200 max_x max_y "black" "white" parsed_histogram
+
+    sprite <- newSprite histogram_texture
+    setProperty "x" sprite (floatAsVal $ fromIntegral screen_width / 2.0)
+    setProperty "y" sprite (floatAsVal 200.0)
+    setAnchor sprite 0.5
+    addChild app sprite
+
 
     let sample_button = Button {
         button_text = "Sample",
