@@ -1,42 +1,41 @@
-# GHC WASM Pong
+# GHC WASM PIXI Sample
 
-A classic Pong game implemented in Haskell and compiled to WebAssembly using the [GHC WASM backend](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta). The game runs in the browser or as a standalone Electron application with full gamepad support.
+A minimal PIXI.js demo written in Haskell and compiled to WebAssembly using the
+[GHC WASM backend](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta). It renders a score
+label and a clickable "Sample" button; each click updates the score by sampling from
+a normal distribution. The project also includes FFI helpers for PIXI.js and utility bindings.
 
 ## Features
 
-- Classic Pong gameplay with physics-based ball movement
-- Player vs Computer AI
-- Fullscreen mode for immersive gameplay
-- **Gamepad support** - Control the paddle with a gamepad (left stick X axis)
-- **Mouse control** - Move the paddle with your mouse
-- Cross-platform Electron builds (Linux AppImage/Deb, Windows NSIS/Portable)
-- All dependencies vendored for offline builds
+- PIXI.js rendering from Haskell via JavaScript FFI
+- Clickable button with event handler entirely in Haskell
+- Score updated from a normal distribution sample
+- Optional vendored JS dependencies for offline builds
+- Electron desktop builds (Linux AppImage/Deb, Windows NSIS/Portable)
 
-## Running in Browser
+## Run in the browser
 
-To build and run the project in a browser:
-
-1. Build the Docker image and copy the compiled files:
+1. Build the WebAssembly and copy artifacts into `public/`:
    ```bash
    ./build-and-copy.sh
    ```
 
-2. Vendor the dependencies:
+2. (Optional) Vendor the CDN dependencies for offline use:
    ```bash
    ./scripts/vendor-dependencies.sh
    ```
 
-3. Start a local web server:
+3. Start a local web server (any static server works):
    ```bash
    python -m http.server 8001
    ```
 
-4. Open your browser and navigate to:
+4. Open in your browser:
    ```
    http://localhost:8001
    ```
 
-## Building Electron App
+## Electron builds
 
 To build standalone Electron applications:
 
@@ -46,43 +45,31 @@ To build standalone Electron applications:
 
 This will:
 1. Build the WASM files (if needed)
-2. Vendor all CDN dependencies
+2. Vendor CDN dependencies
 3. Build Electron apps for Linux and Windows using Docker
 
 Built packages will be available in the `dist/` directory:
 - **Linux**: AppImage and Debian package (.deb)
 - **Windows**: NSIS installer and portable executable
 
-## Running Electron App Locally
+## Interaction
 
-To run the Electron app in development mode:
+- Click the "Sample" button to update the score shown on screen.
 
-```bash
-npm install
-npm run electron:dev
-```
+## Technical details
 
-## Controls
-
-- **Mouse**: Move your mouse horizontally to control the bottom paddle
-- **Gamepad**: Use the left stick X axis to control the bottom paddle
-  - Gamepad input takes precedence when active
-  - Deadzone applied to prevent drift
-
-## Technical Details
-
-- Built with GHC WASM backend for WebAssembly compilation
-- Uses PIXI.js for 2D rendering
-- WASI runtime for WebAssembly execution
+- Built with the GHC WASM backend targeting `wasm32-wasi`
+- PIXI.js for 2D rendering
+- JavaScript FFI via `foreign import javascript`
 - Electron for desktop packaging
-- All JavaScript dependencies vendored for offline operation
+- Optional vendored JavaScript dependencies for offline operation
 
-## Project Structure
+## Project structure
 
-- `app/Test.hs` - Main game logic and Pong implementation
-- `src/Lib.hs` - PIXI.js FFI bindings and gamepad API wrappers
-- `electron/` - Electron main process and preload scripts
-- `assets/` - Game assets (Haskell logo for ball sprite)
-- `vendor/` - Vendored JavaScript dependencies
-- `Dockerfile` - Build environment for WASM compilation
-- `Dockerfile.electron` - Build environment for Electron packaging
+- `app/App.hs` — Entry point and demo logic
+- `src/Lib.hs` — PIXI.js FFI bindings and JS interop utilities
+- `public/` — `index.html`, `agoc.wasm`, `ghc_wasm_jsffi.js`
+- `electron/` — Electron main process and preload scripts
+- `scripts/` — Helper scripts (e.g. `vendor-dependencies.sh`)
+- `Dockerfile` — Build environment for WASM compilation
+- `Dockerfile.electron` — Build environment for Electron packaging
