@@ -21,11 +21,13 @@ type JSFunction = JSVal
 
 type PixiApp = JSVal
 type PixiSprite = JSVal
+type PixiRectangle = JSVal
 type PixiContainer = JSVal
 type PixiTexture = JSVal
 type PixiTicker = JSVal
 type PixiText = JSVal
 type PixiTimeDelta = JSVal
+type PixiGraphics = JSVal
 
 -- *****************************************************************************
 -- * PIXI.js Application Functions
@@ -44,6 +46,18 @@ foreign import javascript unsafe "new PIXI.Application()"
 -- @return A new Text object
 foreign import javascript unsafe "new PIXI.Text({text: $1, style: {fill: $2 }})"
    newText :: JSString -> JSString -> IO PixiText
+
+foreign import javascript unsafe "new PIXI.Rectangle($1, $2, $3, $4)"
+    newRectangle :: Float -> Float -> Float -> Float -> IO PixiRectangle
+
+foreign import javascript unsafe "new PIXI.Graphics()"
+    newGraphics :: IO PixiGraphics
+
+foreign import javascript unsafe "$1.lineStyle($2, $3)"
+    lineStyle :: PixiGraphics -> Float -> JSString -> IO ()
+
+foreign import javascript unsafe "$1.drawRect($2, $3, $4, $5)"
+    drawRect :: PixiGraphics -> Int -> Int -> Int -> Int -> IO ()
 
 -- | Initializes a PIXI.js Application with the given background color.
 --
@@ -253,6 +267,9 @@ foreign import javascript unsafe "$1.position.set($2, $3)"
 -- @return The return value of the function call
 foreign import javascript unsafe "$1($2)"
   callFunction :: JSFunction -> JSVal -> IO JSVal
+
+foreign import javascript unsafe "$1[$2]()"
+    callMethod :: JSVal -> JSString -> IO JSVal
 
 -- | Adds a function to the PIXI.js ticker.
 -- The ticker calls the function on each frame update, allowing for animation
