@@ -1,0 +1,45 @@
+cabal-version:      3.14
+name:               pixijs-ffi
+version:            0.1.0.0
+synopsis:           Haskell FFI bindings for Pixi.js (v8)
+
+description:
+    This package provides comprehensive Haskell FFI bindings for Pixi.js v8,
+    a fast 2D WebGL/WebGPU rendering library. These bindings are designed for
+    use with the GHC WebAssembly backend.
+
+license:            MIT
+license-file:       LICENSE
+author:             Matthias Pall Gissurarson
+maintainer:         mpg@mpg.is
+category:           Graphics
+build-type:         Simple
+
+extra-doc-files:    CHANGELOG.md
+extra-source-files: README.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    hs-source-dirs:   src
+    build-depends:
+        base >= 4.17 && < 5,
+        ghc-experimental
+    default-language: GHC2021
+    exposed-modules:
+        Graphics.PixiJS
+        Graphics.PixiJS.Types
+        Graphics.PixiJS.Application
+        Graphics.PixiJS.Display
+        Graphics.PixiJS.Graphics
+        Graphics.PixiJS.Text
+        Graphics.PixiJS.Assets
+        Graphics.PixiJS.Texture
+        Graphics.PixiJS.Events
+        Graphics.PixiJS.Ticker
+        Graphics.PixiJS.Math
+        Graphics.PixiJS.Filters
+        Graphics.PixiJS.Gamepad
+        Graphics.PixiJS.Interop
