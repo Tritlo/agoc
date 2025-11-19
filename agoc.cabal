@@ -43,7 +43,8 @@ library
     hs-source-dirs:   src
     build-depends:
         base,
-        ghc-experimental
+        ghc-experimental,
+        pixijs-ffi
     default-language: GHC2021
     exposed-modules:
         Lib
@@ -66,6 +67,7 @@ executable agoc
     build-depends:
         base,
         agoc,
+        pixijs-ffi,
         splitmix,
         splitmix-distributions,
         containers,
