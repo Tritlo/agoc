@@ -91,6 +91,7 @@ foreign import javascript "$1"
 -- * Property Access
 -- *****************************************************************************
 
+
 -- | Gets a property from a JavaScript object
 --
 -- @param propName The name of the property to get
@@ -147,10 +148,10 @@ foreign import javascript "$2[$1] += $3"
 -- @param hsFunc A Haskell function that takes a JSVal and returns an IO JSVal
 -- @return A JavaScript function that can be passed to JavaScript code
 foreign import javascript "wrapper"
-  jsFuncFromHs :: (JSVal -> IO JSVal) -> IO JSVal
+  jsFuncFromHs :: (JSVal -> IO JSVal) -> IO JSFunction
 
 -- | Converts a Haskell function to a JavaScript function that does not return a value
-jsFuncFromHs_ :: (JSVal -> IO ()) -> IO JSVal
+jsFuncFromHs_ :: (JSVal -> IO ()) -> IO JSFunction
 jsFuncFromHs_ func =
     jsFuncFromHs (\val -> do
         func val

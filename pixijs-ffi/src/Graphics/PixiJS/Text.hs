@@ -38,8 +38,8 @@ module Graphics.PixiJS.Text
     , setBitmapText
     , getBitmapFontSize
     , setBitmapFontSize
-    , getTint
-    , setTint
+    , getBitmapTint
+    , setBitmapTint
     ) where
 
 import Graphics.PixiJS.Types
@@ -195,8 +195,8 @@ foreign import javascript unsafe "$1.fontSize = $2"
 
 -- | Gets the tint color
 foreign import javascript unsafe "$1.tint"
-    getTint :: BitmapText -> IO Int
+    getBitmapTint :: BitmapText -> IO Int
 
 -- | Sets the tint color
 foreign import javascript unsafe "$1.tint = $2"
-    setTint :: BitmapText -> Int -> IO ()
+    setBitmapTint :: BitmapText -> Int -> IO ()

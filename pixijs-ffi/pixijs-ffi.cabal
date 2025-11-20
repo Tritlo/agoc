@@ -28,6 +28,9 @@ library
         base >= 4.17 && < 5,
         ghc-experimental
     default-language: GHC2021
+    default-extensions:
+        OverloadedStrings,
+        MultilineStrings
     exposed-modules:
         Graphics.PixiJS
         Graphics.PixiJS.Types

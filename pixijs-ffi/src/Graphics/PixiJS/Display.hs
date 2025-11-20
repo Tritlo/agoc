@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- | Pixi.js Display Object bindings
 --
@@ -83,23 +85,35 @@ module Graphics.PixiJS.Display
 
 import Graphics.PixiJS.Types
 import GHC.Wasm.Prim
+import Data.Coerce (coerce)
 
 -- *****************************************************************************
 -- * Container
 -- *****************************************************************************
 
+foreign import javascript unsafe "new PIXI.Container()"
+    js_newContainer :: IO JSVal
+
 -- | Creates a new Pixi.js Container
 -- Containers can hold multiple display objects and be moved together
-foreign import javascript unsafe "new PIXI.Container()"
-    newContainer :: IO Container
+newContainer :: IO Container
+newContainer = fromJSVal <$> js_newContainer
+
+foreign import javascript unsafe "$1.addChild($2)"
+    js_addChild :: JSVal -> JSVal -> IO JSVal
 
 -- | Adds a child display object to a container
 --
 -- @param container The container to add the child to
 -- @param child The child object to add
 -- @return The added child
-foreign import javascript unsafe "$1.addChild($2)"
-    addChild :: Container -> JSVal -> IO JSVal
+addChild :: (IsContainer parent, IsContainer child) => parent -> child -> IO child
+addChild parent child = do
+    _ <- js_addChild (toJSVal parent) (toJSVal child)
+    return child
+
+foreign import javascript unsafe "$1.addChildAt($2, $3)"
+    js_addChildAt :: JSVal -> JSVal -> Int -> IO JSVal
 
 -- | Adds a child display object to a container at a specific index
 --
@@ -107,329 +121,468 @@ foreign import javascript unsafe "$1.addChild($2)"
 -- @param child The child object to add
 -- @param index The index at which to add the child
 -- @return The added child
-foreign import javascript unsafe "$1.addChildAt($2, $3)"
-    addChildAt :: Container -> JSVal -> Int -> IO JSVal
+addChildAt :: (IsContainer parent, IsContainer child) => parent -> child -> Int -> IO child
+addChildAt parent child index = do
+    _ <- js_addChildAt (toJSVal parent) (toJSVal child) index
+    return child
+
+foreign import javascript unsafe "$1.removeChild($2)"
+    js_removeChild :: JSVal -> JSVal -> IO JSVal
 
 -- | Removes a child display object from a container
 --
 -- @param container The container to remove the child from
 -- @param child The child object to remove
 -- @return The removed child
-foreign import javascript unsafe "$1.removeChild($2)"
-    removeChild :: Container -> JSVal -> IO JSVal
+removeChild :: (IsContainer parent, IsContainer child) => parent -> child -> IO child
+removeChild parent child = do
+    _ <- js_removeChild (toJSVal parent) (toJSVal child)
+    return child
+
+foreign import javascript unsafe "$1.removeChildAt($2)"
+    js_removeChildAt :: JSVal -> Int -> IO JSVal
 
 -- | Removes a child at a specific index from a container
 --
 -- @param container The container to remove the child from
 -- @param index The index of the child to remove
--- @return The removed child
-foreign import javascript unsafe "$1.removeChildAt($2)"
-    removeChildAt :: Container -> Int -> IO JSVal
+-- @return The removed child (as a generic Container, since we don't know the type)
+removeChildAt :: (IsContainer parent) => parent -> Int -> IO Container
+removeChildAt parent index = fromJSVal <$> js_removeChildAt (toJSVal parent) index
+
+foreign import javascript unsafe "$1.getChildAt($2)"
+    js_getChildAt :: JSVal -> Int -> IO JSVal
 
 -- | Gets a child at a specific index
 --
 -- @param container The container
 -- @param index The index of the child
--- @return The child at the index
-foreign import javascript unsafe "$1.getChildAt($2)"
-    getChildAt :: Container -> Int -> IO JSVal
+-- @return The child at the index (as a generic Container)
+getChildAt :: (IsContainer parent) => parent -> Int -> IO Container
+getChildAt parent index = fromJSVal <$> js_getChildAt (toJSVal parent) index
+
+foreign import javascript unsafe "$1.getChildIndex($2)"
+    js_getChildIndex :: JSVal -> JSVal -> IO Int
 
 -- | Gets the index of a child in the container
 --
 -- @param container The container
--- @param child The child object
+-- @param child The child to find the index of
 -- @return The index of the child
-foreign import javascript unsafe "$1.getChildIndex($2)"
-    getChildIndex :: Container -> JSVal -> IO Int
+getChildIndex :: (IsContainer parent, IsContainer child) => parent -> child -> IO Int
+getChildIndex parent child = js_getChildIndex (toJSVal parent) (toJSVal child)
+
+foreign import javascript unsafe "$1.setChildIndex($2, $3)"
+    js_setChildIndex :: JSVal -> JSVal -> Int -> IO ()
 
 -- | Sets the index of a child in the container
---
--- @param container The container
--- @param child The child object
--- @param index The new index
-foreign import javascript unsafe "$1.setChildIndex($2, $3)"
-    setChildIndex :: Container -> JSVal -> Int -> IO ()
+setChildIndex :: (IsContainer parent, IsContainer child) => parent -> child -> Int -> IO ()
+setChildIndex parent child index = js_setChildIndex (toJSVal parent) (toJSVal child) index
 
--- | Gets the number of children in a container
---
--- @param container The container
--- @return The number of children
 foreign import javascript unsafe "$1.children.length"
-    getNumChildren :: Container -> IO Int
+    js_getNumChildren :: JSVal -> IO Int
+
+-- | Gets the number of children in the container
+getNumChildren :: (IsContainer parent) => parent -> IO Int
+getNumChildren parent = js_getNumChildren (toJSVal parent)
+
+
+
+-- | Creates a new Container
+
+
+
 
 -- *****************************************************************************
--- * Sprite
+-- * Sprite Operations
 -- *****************************************************************************
 
--- | Creates a new empty Pixi.js Sprite
+-- | Creates a new empty Sprite
+newSprite :: IO Sprite
+newSprite = do
+    val <- js_newSprite
+    return $ fromJSVal val
+
 foreign import javascript unsafe "new PIXI.Sprite()"
-    newSprite :: IO Sprite
+    js_newSprite :: IO JSVal
 
--- | Creates a new Pixi.js Sprite from a texture
---
--- @param texture The texture to use for the sprite
--- @return A new Sprite object
+-- | Creates a new Sprite from a Texture
+newSpriteFromTexture :: Texture -> IO Sprite
+newSpriteFromTexture tex = do
+    val <- js_newSpriteFromTexture (toJSVal tex)
+    return $ fromJSVal val
+
 foreign import javascript unsafe "new PIXI.Sprite($1)"
-    newSpriteFromTexture :: Texture -> IO Sprite
+    js_newSpriteFromTexture :: JSVal -> IO JSVal
+
+-- | Creates a new Sprite from an image URL
+fromImage :: JSString -> IO Sprite
+fromImage url = do
+    val <- js_fromImage url
+    return $ fromJSVal val
+
+foreign import javascript unsafe "PIXI.Sprite.from($1)"
+    js_fromImage :: JSString -> IO JSVal
 
 -- *****************************************************************************
--- * AnimatedSprite
+-- * AnimatedSprite Operations
 -- *****************************************************************************
 
--- | Creates a new Pixi.js AnimatedSprite from an array of textures
---
--- @param textures The array of textures for animation
--- @return A new AnimatedSprite object
+-- | Creates a new AnimatedSprite from a list of Textures
+newAnimatedSprite :: [Texture] -> IO AnimatedSprite
+newAnimatedSprite textures = do
+    -- Convert list of textures to JS array (not implemented yet, using placeholder)
+    -- For now, we assume textures is a JSVal representing an array
+    -- TODO: Implement array conversion
+    val <- js_newAnimatedSprite (error "Array conversion not implemented")
+    return $ fromJSVal val
+
 foreign import javascript unsafe "new PIXI.AnimatedSprite($1)"
-    newAnimatedSprite :: JSVal -> IO AnimatedSprite
+    js_newAnimatedSprite :: JSVal -> IO JSVal
 
--- | Plays the animated sprite
+-- | Plays the animation
+playAnimatedSprite :: IsAnimatedSprite s => s -> IO ()
+playAnimatedSprite sprite = js_play (toJSVal sprite)
+
 foreign import javascript unsafe "$1.play()"
-    playAnimatedSprite :: AnimatedSprite -> IO ()
+    js_play :: JSVal -> IO ()
 
--- | Stops the animated sprite
+-- | Stops the animation
+stopAnimatedSprite :: IsAnimatedSprite s => s -> IO ()
+stopAnimatedSprite sprite = js_stop (toJSVal sprite)
+
 foreign import javascript unsafe "$1.stop()"
-    stopAnimatedSprite :: AnimatedSprite -> IO ()
+    js_stop :: JSVal -> IO ()
 
--- | Goes to a specific frame and plays from there
---
--- @param sprite The animated sprite
--- @param frame The frame number to go to
-foreign import javascript unsafe "$1.gotoAndPlay($2)"
-    gotoAndPlay :: AnimatedSprite -> Int -> IO ()
+-- | Sets the animation speed
+setAnimationSpeed :: IsAnimatedSprite s => s -> Float -> IO ()
+setAnimationSpeed sprite speed = js_setAnimationSpeed (toJSVal sprite) speed
 
--- | Goes to a specific frame and stops
---
--- @param sprite The animated sprite
--- @param frame The frame number to go to
-foreign import javascript unsafe "$1.gotoAndStop($2)"
-    gotoAndStop :: AnimatedSprite -> Int -> IO ()
+foreign import javascript unsafe "$1.animationSpeed = $2"
+    js_setAnimationSpeed :: JSVal -> Float -> IO ()
+
+foreign import javascript unsafe "$1.animationSpeed"
+    js_getAnimationSpeed :: JSVal -> IO Float
 
 -- | Gets the animation speed
-foreign import javascript unsafe "$1.animationSpeed"
-    getAnimationSpeed :: AnimatedSprite -> IO Float
+getAnimationSpeed :: IsAnimatedSprite s => s -> IO Float
+getAnimationSpeed sprite = js_getAnimationSpeed (toJSVal sprite)
 
--- | Sets the animation speed (1.0 = normal speed)
-foreign import javascript unsafe "$1.animationSpeed = $2"
-    setAnimationSpeed :: AnimatedSprite -> Float -> IO ()
+-- | Sets whether the animation should loop
+setLoop :: IsAnimatedSprite s => s -> Bool -> IO ()
+setLoop sprite loop = js_setLoop (toJSVal sprite) loop
+
+foreign import javascript unsafe "$1.loop = $2"
+    js_setLoop :: JSVal -> Bool -> IO ()
+
+foreign import javascript unsafe "$1.loop"
+    js_getLoop :: JSVal -> IO Bool
 
 -- | Gets whether the animation loops
-foreign import javascript unsafe "$1.loop"
-    getLoop :: AnimatedSprite -> IO Bool
+getLoop :: IsAnimatedSprite s => s -> IO Bool
+getLoop sprite = js_getLoop (toJSVal sprite)
 
--- | Sets whether the animation loops
-foreign import javascript unsafe "$1.loop = $2"
-    setLoop :: AnimatedSprite -> Bool -> IO ()
+-- | Goes to a specific frame and plays
+gotoAndPlay :: IsAnimatedSprite s => s -> Int -> IO ()
+gotoAndPlay sprite frameNumber = js_gotoAndPlay (toJSVal sprite) frameNumber
+
+foreign import javascript unsafe "$1.gotoAndPlay($2)"
+    js_gotoAndPlay :: JSVal -> Int -> IO ()
+
+-- | Goes to a specific frame and stops
+gotoAndStop :: IsAnimatedSprite s => s -> Int -> IO ()
+gotoAndStop sprite frameNumber = js_gotoAndStop (toJSVal sprite) frameNumber
+
+foreign import javascript unsafe "$1.gotoAndStop($2)"
+    js_gotoAndStop :: JSVal -> Int -> IO ()
 
 -- *****************************************************************************
--- * Display Object Properties - Position
+-- * Transform Operations
 -- *****************************************************************************
 
--- | Gets the x position of a display object
-foreign import javascript unsafe "$1.x"
-    getX :: JSVal -> IO Float
+-- | Sets the x coordinate
+setX :: IsContainer c => c -> Float -> IO ()
+setX obj x = js_setX (toJSVal obj) x
 
--- | Sets the x position of a display object
 foreign import javascript unsafe "$1.x = $2"
-    setX :: JSVal -> Float -> IO ()
+    js_setX :: JSVal -> Float -> IO ()
 
--- | Gets the y position of a display object
-foreign import javascript unsafe "$1.y"
-    getY :: JSVal -> IO Float
+-- | Sets the y coordinate
+setY :: IsContainer c => c -> Float -> IO ()
+setY obj y = js_setY (toJSVal obj) y
 
--- | Sets the y position of a display object
 foreign import javascript unsafe "$1.y = $2"
-    setY :: JSVal -> Float -> IO ()
+    js_setY :: JSVal -> Float -> IO ()
 
--- | Sets the position of a display object
---
--- @param obj The display object
--- @param x The x coordinate
--- @param y The y coordinate
+-- | Gets the x coordinate
+getX :: IsContainer c => c -> IO Float
+getX obj = js_getX (toJSVal obj)
+
+foreign import javascript unsafe "$1.x"
+    js_getX :: JSVal -> IO Float
+
+-- | Gets the y coordinate
+getY :: IsContainer c => c -> IO Float
+getY obj = js_getY (toJSVal obj)
+
+foreign import javascript unsafe "$1.y"
+    js_getY :: JSVal -> IO Float
+
+-- | Sets the position
+setPosition :: IsContainer c => c -> Float -> Float -> IO ()
+setPosition obj x y = js_setPosition (toJSVal obj) x y
+
 foreign import javascript unsafe "$1.position.set($2, $3)"
-    setPosition :: JSVal -> Float -> Float -> IO ()
+    js_setPosition :: JSVal -> Float -> Float -> IO ()
 
--- | Gets the position of a display object as a Point
 foreign import javascript unsafe "$1.position"
-    getPosition :: JSVal -> IO Point
+    js_getPosition :: JSVal -> IO JSVal
 
--- *****************************************************************************
--- * Display Object Properties - Scale
--- *****************************************************************************
+-- | Gets the position as a Point
+getPosition :: IsContainer c => c -> IO Point
+getPosition obj = Point <$> js_getPosition (toJSVal obj)
 
--- | Gets the x scale of a display object
-foreign import javascript unsafe "$1.scale.x"
-    getScaleX :: JSVal -> IO Float
+-- | Sets the rotation (in radians)
+setRotation :: IsContainer c => c -> Float -> IO ()
+setRotation obj rotation = js_setRotation (toJSVal obj) rotation
 
--- | Sets the x scale of a display object
-foreign import javascript unsafe "$1.scale.x = $2"
-    setScaleX :: JSVal -> Float -> IO ()
-
--- | Gets the y scale of a display object
-foreign import javascript unsafe "$1.scale.y"
-    getScaleY :: JSVal -> IO Float
-
--- | Sets the y scale of a display object
-foreign import javascript unsafe "$1.scale.y = $2"
-    setScaleY :: JSVal -> Float -> IO ()
-
--- | Sets the uniform scale of a display object
---
--- @param obj The display object
--- @param scale The scale value (1.0 = normal size)
-foreign import javascript unsafe "$1.scale.set($2)"
-    setScale :: JSVal -> Float -> IO ()
-
--- *****************************************************************************
--- * Display Object Properties - Rotation
--- *****************************************************************************
-
--- | Gets the rotation of a display object (in radians)
-foreign import javascript unsafe "$1.rotation"
-    getRotation :: JSVal -> IO Float
-
--- | Sets the rotation of a display object (in radians)
 foreign import javascript unsafe "$1.rotation = $2"
-    setRotation :: JSVal -> Float -> IO ()
+    js_setRotation :: JSVal -> Float -> IO ()
 
--- *****************************************************************************
--- * Display Object Properties - Anchor
--- *****************************************************************************
+-- | Gets the rotation (in radians)
+getRotation :: IsContainer c => c -> IO Float
+getRotation obj = js_getRotation (toJSVal obj)
 
--- | Sets the anchor point of a sprite
--- The anchor determines the point around which transformations are applied
--- A value of 0.5 means the anchor is at the center
---
--- @param sprite The sprite whose anchor should be set
--- @param anchorValue The anchor value (typically 0.0 to 1.0)
-foreign import javascript unsafe "$1.anchor.set($2)"
-    setAnchor :: Sprite -> Float -> IO ()
+foreign import javascript unsafe "$1.rotation"
+    js_getRotation :: JSVal -> IO Float
 
--- | Sets the x anchor of a sprite
+-- | Sets the scale
+setScale :: IsContainer c => c -> Float -> Float -> IO ()
+setScale obj x y = js_setScale (toJSVal obj) x y
+
+foreign import javascript unsafe "$1.scale.set($2, $3)"
+    js_setScale :: JSVal -> Float -> Float -> IO ()
+
+-- | Sets the x scale
+setScaleX :: IsContainer c => c -> Float -> IO ()
+setScaleX obj x = js_setScaleX (toJSVal obj) x
+
+foreign import javascript unsafe "$1.scale.x = $2"
+    js_setScaleX :: JSVal -> Float -> IO ()
+
+foreign import javascript unsafe "$1.scale.x"
+    js_getScaleX :: JSVal -> IO Float
+
+-- | Gets the x scale
+getScaleX :: IsContainer c => c -> IO Float
+getScaleX obj = js_getScaleX (toJSVal obj)
+
+-- | Sets the y scale
+setScaleY :: IsContainer c => c -> Float -> IO ()
+setScaleY obj y = js_setScaleY (toJSVal obj) y
+
+foreign import javascript unsafe "$1.scale.y = $2"
+    js_setScaleY :: JSVal -> Float -> IO ()
+
+foreign import javascript unsafe "$1.scale.y"
+    js_getScaleY :: JSVal -> IO Float
+
+-- | Gets the y scale
+getScaleY :: IsContainer c => c -> IO Float
+getScaleY obj = js_getScaleY (toJSVal obj)
+
+-- | Sets the anchor (for Sprites and Text)
+setAnchor :: IsSprite s => s -> Float -> Float -> IO ()
+setAnchor obj x y = js_setAnchor (toJSVal obj) x y
+
+foreign import javascript unsafe "$1.anchor.set($2, $3)"
+    js_setAnchor :: JSVal -> Float -> Float -> IO ()
+
+-- | Sets the x anchor
+setAnchorX :: IsSprite s => s -> Float -> IO ()
+setAnchorX obj x = js_setAnchorX (toJSVal obj) x
+
 foreign import javascript unsafe "$1.anchor.x = $2"
-    setAnchorX :: Sprite -> Float -> IO ()
+    js_setAnchorX :: JSVal -> Float -> IO ()
 
--- | Sets the y anchor of a sprite
+-- | Sets the y anchor
+setAnchorY :: IsSprite s => s -> Float -> IO ()
+setAnchorY obj y = js_setAnchorY (toJSVal obj) y
+
 foreign import javascript unsafe "$1.anchor.y = $2"
-    setAnchorY :: Sprite -> Float -> IO ()
+    js_setAnchorY :: JSVal -> Float -> IO ()
 
--- *****************************************************************************
--- * Display Object Properties - Visibility
--- *****************************************************************************
-
--- | Gets the visibility of a display object
 foreign import javascript unsafe "$1.visible"
-    getVisible :: JSVal -> IO Bool
+    js_getVisible :: JSVal -> IO Bool
 
--- | Sets the visibility of a display object
+-- | Gets whether the object is visible
+getVisible :: IsContainer c => c -> IO Bool
+getVisible obj = js_getVisible (toJSVal obj)
+
 foreign import javascript unsafe "$1.visible = $2"
-    setVisible :: JSVal -> Bool -> IO ()
+    js_setVisible :: JSVal -> Bool -> IO ()
+
+-- | Sets whether the object is visible
+setVisible :: IsContainer c => c -> Bool -> IO ()
+setVisible obj visible = js_setVisible (toJSVal obj) visible
 
 -- *****************************************************************************
--- * Display Object Properties - Alpha
--- *****************************************************************************
+
+foreign import javascript unsafe "$1.alpha"
+    js_getAlpha :: JSVal -> IO Float
 
 -- | Gets the alpha (opacity) of a display object (0.0 to 1.0)
-foreign import javascript unsafe "$1.alpha"
-    getAlpha :: JSVal -> IO Float
+getAlpha :: (IsContainer obj) => obj -> IO Float
+getAlpha obj = js_getAlpha (toJSVal obj)
+
+foreign import javascript unsafe "$1.alpha = $2"
+    js_setAlpha :: JSVal -> Float -> IO ()
 
 -- | Sets the alpha (opacity) of a display object (0.0 to 1.0)
-foreign import javascript unsafe "$1.alpha = $2"
-    setAlpha :: JSVal -> Float -> IO ()
+setAlpha :: (IsContainer obj) => obj -> Float -> IO ()
+setAlpha obj alpha = js_setAlpha (toJSVal obj) alpha
 
 -- *****************************************************************************
 -- * Display Object Properties - Tint
 -- *****************************************************************************
 
--- | Gets the tint color of a sprite (as a number)
 foreign import javascript unsafe "$1.tint"
-    getTint :: Sprite -> IO Int
+    js_getTint :: JSVal -> IO Int
+
+-- | Gets the tint color of a sprite (as a number)
+getTint :: (IsSprite sprite) => sprite -> IO Int
+getTint sprite = js_getTint (toJSVal sprite)
+
+foreign import javascript unsafe "$1.tint = $2"
+    js_setTint :: JSVal -> Int -> IO ()
 
 -- | Sets the tint color of a sprite
 -- The tint is a hex color value (e.g., 0xFFFFFF for white)
-foreign import javascript unsafe "$1.tint = $2"
-    setTint :: Sprite -> Int -> IO ()
+setTint :: (IsSprite sprite) => sprite -> Int -> IO ()
+setTint sprite tint = js_setTint (toJSVal sprite) tint
 
 -- *****************************************************************************
 -- * Display Object Properties - Dimensions
 -- *****************************************************************************
 
--- | Gets the width of a display object
 foreign import javascript unsafe "$1.width"
-    getWidth :: JSVal -> IO Float
+    js_getWidth :: JSVal -> IO Float
+
+-- | Gets the width of a display object
+getWidth :: (IsContainer obj) => obj -> IO Float
+getWidth obj = js_getWidth (toJSVal obj)
+
+foreign import javascript unsafe "$1.width = $2"
+    js_setWidth :: JSVal -> Float -> IO ()
 
 -- | Sets the width of a display object
-foreign import javascript unsafe "$1.width = $2"
-    setWidth :: JSVal -> Float -> IO ()
+setWidth :: (IsContainer obj) => obj -> Float -> IO ()
+setWidth obj width = js_setWidth (toJSVal obj) width
+
+foreign import javascript unsafe "$1.height"
+    js_getHeight :: JSVal -> IO Float
 
 -- | Gets the height of a display object
-foreign import javascript unsafe "$1.height"
-    getHeight :: JSVal -> IO Float
+getHeight :: (IsContainer obj) => obj -> IO Float
+getHeight obj = js_getHeight (toJSVal obj)
+
+foreign import javascript unsafe "$1.height = $2"
+    js_setHeight :: JSVal -> Float -> IO ()
 
 -- | Sets the height of a display object
-foreign import javascript unsafe "$1.height = $2"
-    setHeight :: JSVal -> Float -> IO ()
+setHeight :: (IsContainer obj) => obj -> Float -> IO ()
+setHeight obj height = js_setHeight (toJSVal obj) height
 
 -- *****************************************************************************
 -- * Display Object Properties - Pivot
 -- *****************************************************************************
+
+foreign import javascript unsafe "$1.pivot.set($2, $3)"
+    js_setPivot :: JSVal -> Float -> Float -> IO ()
 
 -- | Sets the pivot point of a display object
 --
 -- @param obj The display object
 -- @param x The x coordinate of the pivot
 -- @param y The y coordinate of the pivot
-foreign import javascript unsafe "$1.pivot.set($2, $3)"
-    setPivot :: JSVal -> Float -> Float -> IO ()
+setPivot :: (IsContainer obj) => obj -> Float -> Float -> IO ()
+setPivot obj x y = js_setPivot (toJSVal obj) x y
+
+foreign import javascript unsafe "$1.pivot.x = $2"
+    js_setPivotX :: JSVal -> Float -> IO ()
 
 -- | Sets the x pivot of a display object
-foreign import javascript unsafe "$1.pivot.x = $2"
-    setPivotX :: JSVal -> Float -> IO ()
+setPivotX :: (IsContainer obj) => obj -> Float -> IO ()
+setPivotX obj x = js_setPivotX (toJSVal obj) x
+
+foreign import javascript unsafe "$1.pivot.y = $2"
+    js_setPivotY :: JSVal -> Float -> IO ()
 
 -- | Sets the y pivot of a display object
-foreign import javascript unsafe "$1.pivot.y = $2"
-    setPivotY :: JSVal -> Float -> IO ()
+setPivotY :: (IsContainer obj) => obj -> Float -> IO ()
+setPivotY obj y = js_setPivotY (toJSVal obj) y
 
 -- *****************************************************************************
 -- * Display Object Properties - Interactive
 -- *****************************************************************************
 
--- | Sets whether a display object is interactive (can receive events)
 foreign import javascript unsafe "$1.interactive = $2"
-    setInteractive :: JSVal -> Bool -> IO ()
+    js_setInteractive :: JSVal -> Bool -> IO ()
+
+-- | Sets whether a display object is interactive (can receive events)
+setInteractive :: (IsContainer obj) => obj -> Bool -> IO ()
+setInteractive obj interactive = js_setInteractive (toJSVal obj) interactive
+
+foreign import javascript unsafe "$1.buttonMode = $2"
+    js_setButtonMode :: JSVal -> Bool -> IO ()
 
 -- | Sets whether a display object acts as a button (changes cursor on hover)
-foreign import javascript unsafe "$1.buttonMode = $2"
-    setButtonMode :: JSVal -> Bool -> IO ()
+setButtonMode :: (IsContainer obj) => obj -> Bool -> IO ()
+setButtonMode obj buttonMode = js_setButtonMode (toJSVal obj) buttonMode
 
 -- *****************************************************************************
 -- * Display Object Properties - Masks
 -- *****************************************************************************
 
--- | Sets a mask for a display object
 foreign import javascript unsafe "$1.mask = $2"
-    setMask :: JSVal -> JSVal -> IO ()
+    js_setMask :: JSVal -> JSVal -> IO ()
+
+-- | Sets a mask for a display object
+setMask :: (IsContainer obj, IsContainer maskObj) => obj -> maskObj -> IO ()
+setMask obj maskObj = js_setMask (toJSVal obj) (toJSVal maskObj)
+
+foreign import javascript unsafe "$1.mask"
+    js_getMask :: JSVal -> IO JSVal
 
 -- | Gets the mask of a display object
-foreign import javascript unsafe "$1.mask"
-    getMask :: JSVal -> IO JSVal
+getMask :: (IsContainer obj) => obj -> IO Container
+getMask obj = fromJSVal <$> js_getMask (toJSVal obj)
 
 -- *****************************************************************************
 -- * Display Object Properties - Parent
 -- *****************************************************************************
 
--- | Gets the parent of a display object
 foreign import javascript unsafe "$1.parent"
-    getParent :: JSVal -> IO Container
+    js_getParent :: JSVal -> IO JSVal
+
+-- | Gets the parent of a display object
+getParent :: (IsContainer obj) => obj -> IO Container
+getParent obj = fromJSVal <$> js_getParent (toJSVal obj)
 
 -- *****************************************************************************
 -- * Bounds
 -- *****************************************************************************
 
--- | Gets the bounds of a display object in global coordinates
 foreign import javascript unsafe "$1.getBounds()"
-    getBounds :: JSVal -> IO Rectangle
+    js_getBounds :: JSVal -> IO JSVal
+
+-- | Gets the bounds of a display object in global coordinates
+getBounds :: (IsContainer obj) => obj -> IO Rectangle
+getBounds obj = Rectangle <$> js_getBounds (toJSVal obj)
+
+foreign import javascript unsafe "$1.getLocalBounds()"
+    js_getLocalBounds :: JSVal -> IO JSVal
 
 -- | Gets the bounds of a display object in local coordinates
-foreign import javascript unsafe "$1.getLocalBounds()"
-    getLocalBounds :: JSVal -> IO Rectangle
+getLocalBounds :: (IsContainer obj) => obj -> IO Rectangle
+getLocalBounds obj = Rectangle <$> js_getLocalBounds (toJSVal obj)

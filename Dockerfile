@@ -24,21 +24,21 @@ RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt \
     echo $TZ > /etc/timezone && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-      sudo \
-      git \
-      curl \
-      ca-certificates \
-      locales \
-      build-essential \
-      unzip \
-      gosu \
-      libffi-dev \
-      libgmp-dev \
-      jq \
-      zstd \
-      nodejs \
-      npm \
-      && \
+    sudo \
+    git \
+    curl \
+    ca-certificates \
+    locales \
+    build-essential \
+    unzip \
+    gosu \
+    libffi-dev \
+    libgmp-dev \
+    jq \
+    zstd \
+    nodejs \
+    npm \
+    && \
     apt-get autoremove -y && \
     apt-get clean -y && \
     sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen && \
@@ -74,6 +74,8 @@ RUN curl -fsSL https://get-ghcup.haskell.org -o /tmp/get-ghcup.sh && \
 # We copy only the cabal files, since these won't change usually. This lets us avoid
 # rebuilding the dependencies all the time.
 COPY --parents --chown=${UID}:${GID} *.cabal /app/
+COPY --parents --chown=${UID}:${GID} pixijs-ffi/*.cabal /app/
+COPY --parents --chown=${UID}:${GID}  pixijs-ffi/ /app/
 COPY --chown=${UID}:${GID} cabal.project /app/cabal.project
 COPY --chown=${UID}:${GID} cabal.project.local /app/cabal.project.local
 
@@ -82,10 +84,10 @@ WORKDIR /app
 RUN cabal update && \
     source /home/$USER_NAME/.ghc-wasm/env && \
     cabal --with-compiler=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc \
-          --with-hc-pkg=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc-pkg \
-          --with-hsc2hs=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-hsc2hs \
-          --with-haddock=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-haddock \
-          build --only-dependencies --project-file=cabal.project --project-dir=/app
+    --with-hc-pkg=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc-pkg \
+    --with-hsc2hs=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-hsc2hs \
+    --with-haddock=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-haddock \
+    build --only-dependencies --project-file=cabal.project --project-dir=/app
 
 # Copy the rest of the source code (including dpella-ffi)
 COPY --parents --chown=${UID}:${GID}  src/ /app/
@@ -97,19 +99,26 @@ WORKDIR /app
 # Build all the packages
 RUN source /home/$USER_NAME/.ghc-wasm/env && \
     cabal --with-compiler=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc \
-          --with-hc-pkg=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc-pkg \
-          --with-hsc2hs=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-hsc2hs \
-          --with-haddock=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-haddock \
-          build all --project-file=cabal.project --project-dir=/app
+    --with-hc-pkg=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-ghc-pkg \
+    --with-hsc2hs=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-hsc2hs \
+    --with-haddock=/home/$USER_NAME/.ghc-wasm/wasm32-wasi-ghc/bin/wasm32-wasi-haddock \
+    build all --project-file=cabal.project --project-dir=/app
 
 # Generate ghc_wasm_jsffi.js from the compiled wasm file
 RUN source /home/$USER_NAME/.ghc-wasm/env && \
     WASM_FILE=$(find dist-newstyle -name "agoc.wasm" -type f | head -n 1) && \
     if [ -n "$WASM_FILE" ]; then \
-        LIBDIR=$(wasm32-wasi-ghc --print-libdir) && \
-        node "$LIBDIR/post-link.mjs" -i "$WASM_FILE" -o /app/ghc_wasm_jsffi.js; \
+    LIBDIR=$(wasm32-wasi-ghc --print-libdir) && \
+    node "$LIBDIR/post-link.mjs" -i "$WASM_FILE" -o /app/ghc_wasm_jsffi.js; \
     else \
-        echo "Warning: agoc.wasm not found, skipping JSFFI generation"; \
+    echo "Warning: agoc.wasm not found, skipping JSFFI generation"; \
+    fi && \
+    TEST_WASM_FILE=$(find dist-newstyle -name "pixijs-ffi-test.wasm" -type f | head -n 1) && \
+    if [ -n "$TEST_WASM_FILE" ]; then \
+    LIBDIR=$(wasm32-wasi-ghc --print-libdir) && \
+    node "$LIBDIR/post-link.mjs" -i "$TEST_WASM_FILE" -o /app/test_ghc_wasm_jsffi.js; \
+    else \
+    echo "Warning: pixijs-ffi-test.wasm not found, skipping JSFFI generation"; \
     fi
 
 # Copy the scripts, datasets, tests, and extra files
