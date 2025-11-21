@@ -15,6 +15,11 @@ module Graphics.PixiJS.Assets
     , getAsset
     , unloadAsset
     , unloadBundle
+      -- * Asset Conversion
+    , assetToTexture
+    , assetToTextures
+      -- * Asset Property Access
+    , getAssetProperty
       -- * Cache
     , cacheGet
     , cacheSet
@@ -30,19 +35,32 @@ import GHC.Wasm.Prim
 -- * Loading Assets
 -- *****************************************************************************
 
--- | Loads a single asset (texture) asynchronously
+-- | Loads a single asset asynchronously
 -- This function uses a safe import because it needs to await the asset loading
+--
+-- The returned Asset can be:
+-- - A Texture (for simple images)
+-- - A Spritesheet with animations (for spritesheet JSON files)
+-- - Other asset types (fonts, etc.)
 --
 -- Example:
 -- @
--- texture <- loadAsset "path/to/image.png"
+-- asset <- loadAsset "path/to/image.png"
+-- texture <- assetToTexture asset
 -- sprite <- newSpriteFromTexture texture
 -- @
 --
+-- For spritesheets:
+-- @
+-- asset <- loadAsset "path/to/spritesheet.json"
+-- textures <- getPropertyKey ["animations", "walk"] asset
+-- sprite <- newAnimatedSprite textures
+-- @
+--
 -- @param path The path to the asset as a JavaScript string
--- @return The loaded texture as a JSVal
+-- @return The loaded asset
 foreign import javascript safe "await PIXI.Assets.load($1)"
-    loadAsset :: JSString -> IO Texture
+    loadAsset :: JSString -> IO Asset
 
 -- | Loads multiple assets asynchronously
 --
@@ -96,6 +114,53 @@ foreign import javascript safe "await PIXI.Assets.unload($1)"
 -- @param bundleName The name of the bundle to unload
 foreign import javascript safe "await PIXI.Assets.unloadBundle($1)"
     unloadBundle :: JSString -> IO ()
+
+-- *****************************************************************************
+-- * Asset Conversion
+-- *****************************************************************************
+
+-- | Converts an Asset to a Texture
+-- Use this when you know the loaded asset is a simple texture (e.g., a PNG/JPG image)
+--
+-- Example:
+-- @
+-- asset <- loadAsset "path/to/image.png"
+-- texture <- assetToTexture asset
+-- @
+assetToTexture :: Asset -> IO Texture
+assetToTexture (Asset jsval) = return $ fromJSVal jsval
+
+-- | Converts an Asset to Textures (a JavaScript array of textures)
+-- Use this when you know the asset contains a texture array
+--
+-- Example:
+-- @
+-- asset <- loadAsset "path/to/spritesheet.json"
+-- animTextures <- getPropertyKey ["animations", "walk"] asset
+-- textures <- assetToTextures animTextures
+-- @
+assetToTextures :: Asset -> IO Textures
+assetToTextures (Asset jsval) = return $ fromJSVal jsval
+
+-- *****************************************************************************
+-- * Asset Property Access
+-- *****************************************************************************
+
+-- | Gets a property from an Asset by key
+-- Useful for accessing nested properties like spritesheet animations
+--
+-- Example:
+-- @
+-- asset <- loadAsset "path/to/spritesheet.json"
+-- textures <- getAssetProperty "animations" asset >>= getAssetProperty "walk"
+-- sprite <- newAnimatedSprite textures
+-- @
+foreign import javascript unsafe "$2[$1]"
+    js_getAssetProperty :: JSString -> JSVal -> IO JSVal
+
+-- | Gets a property from an Asset
+getAssetProperty :: JSString -> Asset -> IO Asset
+getAssetProperty key (Asset jsval) = Asset <$> js_getAssetProperty key jsval
 
 -- *****************************************************************************
 -- * Cache

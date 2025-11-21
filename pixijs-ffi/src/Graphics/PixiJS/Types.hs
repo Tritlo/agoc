@@ -39,6 +39,9 @@ module Graphics.PixiJS.Types
       -- * Texture Types
     , Texture(..)
     , RenderTexture(..)
+      -- * Asset Types
+    , Asset(..)
+    , Textures(..)
       -- * Math Types
     , Point(..)
     , Rectangle(..)
@@ -217,6 +220,27 @@ newtype RenderTexture = RenderTexture Texture
     deriving (IsPixiObject, IsEventEmitter, IsTexture) via Texture
 
 instance IsRenderTexture RenderTexture
+
+-- *****************************************************************************
+-- * Asset Types
+-- *****************************************************************************
+
+-- | A generic asset returned by PIXI.Assets.load
+-- Assets can be textures, spritesheets, fonts, or other loaded resources
+newtype Asset = Asset JSVal
+
+
+instance IsPixiObject Asset where
+    toJSVal = coerce
+    fromJSVal = coerce
+
+-- | A JavaScript array of textures (used for AnimatedSprite)
+newtype Textures = Textures JSVal
+
+
+instance IsPixiObject Textures where
+    toJSVal = coerce
+    fromJSVal = coerce
 
 -- *****************************************************************************
 -- * Math Types

@@ -228,14 +228,16 @@ foreign import javascript unsafe "PIXI.Sprite.from($1)"
 -- * AnimatedSprite Operations
 -- *****************************************************************************
 
--- | Creates a new AnimatedSprite from a list of Textures
-newAnimatedSprite :: [Texture] -> IO AnimatedSprite
-newAnimatedSprite textures = do
-    -- Convert list of textures to JS array (not implemented yet, using placeholder)
-    -- For now, we assume textures is a JSVal representing an array
-    -- TODO: Implement array conversion
-    val <- js_newAnimatedSprite (error "Array conversion not implemented")
-    return $ fromJSVal val
+-- | Creates a new AnimatedSprite from Textures
+--
+-- Example:
+-- @
+-- asset <- loadAsset "path/to/spritesheet.json"
+-- textures <- getAssetProperty "animations" asset >>= getAssetProperty "walk"
+-- sprite <- newAnimatedSprite =<< assetToTextures textures
+-- @
+newAnimatedSprite :: Textures -> IO AnimatedSprite
+newAnimatedSprite textures = fromJSVal <$> js_newAnimatedSprite (toJSVal textures)
 
 foreign import javascript unsafe "new PIXI.AnimatedSprite($1)"
     js_newAnimatedSprite :: JSVal -> IO JSVal
