@@ -9,23 +9,42 @@ test.describe('Sample Button', () => {
     const canvas = await page.waitForSelector('canvas', { timeout: 10000 });
     expect(canvas).toBeTruthy();
 
-    // Wait for the SAMPLE button to be exported (indicates WASM is ready)
-    await page.waitForFunction(() => (window as any).SAMPLE !== undefined, { timeout: 10000 });
+    // Give the app a moment to fully render the start screen
+    await page.waitForTimeout(1000);
 
-    // Give the app a moment to fully render
-    await page.waitForTimeout(500);
+    // First, we need to navigate from the start screen to the game screen
+    // Click "Start Game" which is the first menu item at center of screen
+    const boundingBox = await canvas.boundingBox();
+    if (!boundingBox) throw new Error('Canvas has no bounding box');
+
+    const centerX = boundingBox.x + boundingBox.width / 2;
+    const menuY = boundingBox.y + boundingBox.height / 2;
+
+    // Click "Start Game"
+    await page.mouse.click(centerX, menuY);
+
+    // Wait for the game screen to load (histogram takes time to render)
+    await page.waitForTimeout(1500);
 
     // Helper function to get score text from the stage
     const getScoreText = async () => {
       return await page.evaluate(() => {
-        const sample = (window as any).SAMPLE;
-        if (!sample?.parent?.children) return null;
-        for (const child of sample.parent.children) {
-          if (child.text && child.text.startsWith('Score:')) {
-            return child.text;
+        const app = (window as any).__PIXI_APP__;
+        if (!app?.stage?.children) return null;
+
+        const findScore = (container: any): string | null => {
+          if (container.text && container.text.startsWith('Score:')) {
+            return container.text;
           }
-        }
-        return null;
+          if (container.children) {
+            for (const child of container.children) {
+              const result = findScore(child);
+              if (result) return result;
+            }
+          }
+          return null;
+        };
+        return findScore(app.stage);
       });
     };
 
@@ -34,12 +53,9 @@ test.describe('Sample Button', () => {
     console.log(`Initial score: ${initialScore}`);
     expect(initialScore).toBe('Score: 0');
 
-    // Click the Sample button (center-bottom of canvas)
-    const boundingBox = await canvas.boundingBox();
-    if (!boundingBox) throw new Error('Canvas has no bounding box');
-
+    // Click the Sample button (center-bottom of canvas, at height - 150)
     const clickX = boundingBox.x + boundingBox.width / 2;
-    const clickY = boundingBox.y + boundingBox.height - 200;
+    const clickY = boundingBox.y + boundingBox.height - 150;
 
     await page.mouse.click(clickX, clickY);
 

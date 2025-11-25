@@ -15,6 +15,8 @@ module Lib
     , getFirstGamepad
     , getGamepadAxis
     , isGamepadButtonPressed
+      -- * Window Management
+    , closeWindow
     ) where
 
 import GHC.Wasm.Prim
@@ -282,3 +284,20 @@ foreign import javascript unsafe
 -- @return True if button is pressed, False otherwise
 foreign import javascript unsafe "($1 && $1.buttons && $1.buttons[$2]) ? $1.buttons[$2].pressed : false"
     isGamepadButtonPressed :: JSVal -> Int -> IO Bool
+
+-- *****************************************************************************
+-- * Window Management
+-- *****************************************************************************
+
+-- | Closes the application.
+-- In Electron, this uses the electronApp.quit() IPC call.
+-- In a browser, this falls back to window.close() which may be restricted.
+foreign import javascript unsafe
+  """
+  if (window.electronApp && window.electronApp.quit) {
+    window.electronApp.quit();
+  } else {
+    window.close();
+  }
+  """
+    closeWindow :: IO ()

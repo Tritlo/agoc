@@ -1,6 +1,14 @@
 // Preload script - Secure bridge between main and renderer processes
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Expose app control API to renderer process
+contextBridge.exposeInMainWorld('electronApp', {
+  // Quit the application
+  quit: () => {
+    return ipcRenderer.invoke('app:quit');
+  },
+});
+
 // Expose Steamworks API to renderer process
 contextBridge.exposeInMainWorld('steamworks', {
   // Steam API initialization status

@@ -110,11 +110,12 @@ initAppInTarget app bgColor targetSelector = Application <$> js_initAppInTarget 
 -- * Canvas Management
 -- *****************************************************************************
 
-foreign import javascript unsafe "document.body.appendChild($1.canvas)"
+foreign import javascript unsafe "document.body.appendChild($1.canvas); window.__PIXI_APP__ = $1"
     js_appendCanvas :: JSVal -> IO ()
 
 -- | Appends the application's canvas to the document body
--- This makes the Pixi.js canvas visible in the browser
+-- This makes the Pixi.js canvas visible in the browser.
+-- Also exposes the application as window.__PIXI_APP__ for debugging/testing.
 --
 -- @param app The PIXI Application object whose canvas should be appended
 appendCanvas :: Application -> IO ()

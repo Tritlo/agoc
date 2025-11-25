@@ -185,6 +185,14 @@ function createWindow() {
   }
 }
 
+// App IPC Handlers
+function setupAppHandlers() {
+  // Quit the application
+  ipcMain.handle('app:quit', () => {
+    app.quit();
+  });
+}
+
 // Steamworks IPC Handlers
 function setupSteamworksHandlers() {
   // Initialization
@@ -418,6 +426,7 @@ app.whenReady().then(() => {
     }
   });
 
+  setupAppHandlers();
   setupSteamworksHandlers();
   createWindow();
 
