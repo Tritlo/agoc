@@ -83,4 +83,4 @@ executable agoc
     default-language: GHC2021
 
     -- GHC options for reactor module: disable Haskell main, use reactor model, export main symbol
-    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=main
+    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=main -optc-Wno-main-return-type

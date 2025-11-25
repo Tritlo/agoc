@@ -392,21 +392,21 @@ getScaleY :: IsContainer c => c -> IO Float
 getScaleY obj = js_getScaleY (toJSVal obj)
 
 -- | Sets the anchor (for Sprites and Text)
-setAnchor :: IsSprite s => s -> Float -> Float -> IO ()
+setAnchor :: IsContainer c => c -> Float -> Float -> IO ()
 setAnchor obj x y = js_setAnchor (toJSVal obj) x y
 
 foreign import javascript unsafe "$1.anchor.set($2, $3)"
     js_setAnchor :: JSVal -> Float -> Float -> IO ()
 
 -- | Sets the x anchor
-setAnchorX :: IsSprite s => s -> Float -> IO ()
+setAnchorX :: IsContainer c => c -> Float -> IO ()
 setAnchorX obj x = js_setAnchorX (toJSVal obj) x
 
 foreign import javascript unsafe "$1.anchor.x = $2"
     js_setAnchorX :: JSVal -> Float -> IO ()
 
 -- | Sets the y anchor
-setAnchorY :: IsSprite s => s -> Float -> IO ()
+setAnchorY :: IsContainer c => c -> Float -> IO ()
 setAnchorY obj y = js_setAnchorY (toJSVal obj) y
 
 foreign import javascript unsafe "$1.anchor.y = $2"

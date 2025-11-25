@@ -5,7 +5,8 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib
+import Lib (blipWithFreq, histogram_plot, HistogramOptions(..), defaultHistogramOptions)
+import Graphics.PixiJS
 import GHC.Wasm.Prim
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
@@ -31,23 +32,24 @@ data Button = Button {
     button_on_click :: JSVal -> IO ()
 }
 
-renderButton :: PixiApp -> Button -> IO ()
+renderButton :: Application -> Button -> IO ()
 renderButton app button = do
-    button_text <- newText (toJSString button.button_text) (toJSString button.button_color)
-    setProperty "eventMode" button_text (stringAsVal "static")
-    setAnchor button_text 0.5
-    setProperty "x" button_text (floatAsVal button.button_x)
-    setProperty "y" button_text (floatAsVal button.button_y)
-    addEventListener "pointerdown" button_text =<< jsFuncFromHs_ button.button_on_click
-    exportValue "SAMPLE" button_text
+    button_text <- newTextWithStyle (toJSString button.button_text) (toJSString button.button_color)
+    setEventMode button_text "static"
+    setAnchor button_text 0.5 0.5
+    setX button_text button.button_x
+    setY button_text button.button_y
+    on "pointerdown" button_text =<< jsFuncFromHs_ button.button_on_click
+    exportValue "SAMPLE" (toJSVal button_text)
 
-    addEventListener "pointerover" button_text =<< jsFuncFromHs_
-         (\_ -> do setPropertyKey ["style", "fill"] button_text (stringAsVal "blue"))
-    addEventListener "pointerout" button_text =<< jsFuncFromHs_
-         (\_ -> do setPropertyKey ["style", "fill"] button_text (stringAsVal "black"))
+    on "pointerover" button_text =<< jsFuncFromHs_
+         (\_ -> do setPropertyKey ["style", "fill"] (toJSVal button_text) (stringAsVal "blue"))
+    on "pointerout" button_text =<< jsFuncFromHs_
+         (\_ -> do setPropertyKey ["style", "fill"] (toJSVal button_text) (stringAsVal "black"))
 
-
-    addChild app button_text
+    stage <- getStage app
+    _ <- addChild stage button_text
+    return ()
 
 data GameState = GameState {
     gs_score :: Integer,
@@ -142,24 +144,24 @@ histogram_options = defaultHistogramOptions {
     ho_backgroundColor = "white"
 }
 
-updateScore :: IORef GameState -> PixiText -> PixiText -> PixiText -> PixiSprite -> IO ()
+updateScore :: IORef GameState -> Text -> Text -> Text -> Sprite -> IO ()
 updateScore game_state_ref score_text target_text distr_text histogram_sprite = do
     game_state@GameState{..} <- readIORef game_state_ref
     sample <- D.sampleIO $ sampleDists gs_dists
 
     let new_score = gs_score + round sample
-    setProperty "text" score_text (stringAsVal $ toJSString $ "Score: " ++ show new_score)
+    setText score_text (toJSString $ "Score: " ++ show new_score)
     if new_score >= gs_target then do
         blipWithFreq 800.0
         let new_target = gs_target * 2
         let new_dists = gs_dists :|> Normal 500.0 100.0
-        setProperty "text" target_text (stringAsVal $ toJSString $ "Target: " ++ show (new_target))
-        setProperty "text" distr_text (stringAsVal $ toJSString $ "X ~ " ++ showDists new_dists)
+        setText target_text (toJSString $ "Target: " ++ show new_target)
+        setText distr_text (toJSString $ "X ~ " ++ showDists new_dists)
 
         Histogram histogram <- histogram 10_000 100 new_dists
         histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
-        histogram_texture <- histogram_plot histogram_data histogram_options
-        setProperty "texture" histogram_sprite histogram_texture
+        histogram_texture_jsval <- histogram_plot histogram_data histogram_options
+        setProperty "texture" (toJSVal histogram_sprite) histogram_texture_jsval
 
         writeIORef game_state_ref (game_state { gs_score = 0, gs_target = new_target, gs_dists = new_dists })
     else
@@ -170,43 +172,44 @@ main = do
     -- Initialize PIXI application
     app <- newApp >>= flip initApp "white"
     appendCanvas app
-    screen <- getProperty "screen" app
-    screen_width <- valAsInt <$> getProperty "width" screen
-    screen_height <- valAsInt <$> getProperty "height" screen
+    screen <- getScreen app
+    screen_width <- round <$> getRectWidth screen
+    screen_height <- round <$> getRectHeight screen
     let dists = Seq.fromList [Normal 500.0 100.0]
     game_state_ref <- newIORef GameState {
                              gs_score = 0,
                              gs_dists = dists,
                              gs_target = 10_000
                          }
-    target_text <- newText (toJSString "Target: 10000") "black"
-    setProperty "x" target_text (floatAsVal $ fromIntegral screen_width / 2.0)
-    setProperty "y" target_text (floatAsVal $ (fromIntegral screen_height / 2.0) - 100.0)
-    setAnchor target_text 0.5
-    addChild app target_text
+    target_text <- newTextWithStyle (toJSString "Target: 10000") "black"
+    setX target_text (fromIntegral screen_width / 2.0)
+    setY target_text ((fromIntegral screen_height / 2.0) - 100.0)
+    setAnchor target_text 0.5 0.5
+    stage <- getStage app
+    addChild stage target_text
 
-    score_text <- newText (toJSString "Score: 0") "black"
-    setProperty "x" score_text (floatAsVal $ fromIntegral screen_width / 2.0)
-    setProperty "y" score_text (floatAsVal $ fromIntegral screen_height / 2.0)
-    setAnchor score_text 0.5
-    addChild app score_text
+    score_text <- newTextWithStyle (toJSString "Score: 0") "black"
+    setX score_text (fromIntegral screen_width / 2.0)
+    setY score_text (fromIntegral screen_height / 2.0)
+    setAnchor score_text 0.5 0.5
+    addChild stage score_text
 
-    distr_text <- newText (toJSString $ "X ∼ " ++ showDists dists) "black"
-    setProperty "x" distr_text (floatAsVal $ fromIntegral screen_width / 2.0)
-    setProperty "y" distr_text (floatAsVal $ (fromIntegral screen_height / 2.0) + 100.0)
-    setAnchor distr_text 0.5
-    addChild app distr_text
+    distr_text <- newTextWithStyle (toJSString $ "X ∼ " ++ showDists dists) "black"
+    setX distr_text (fromIntegral screen_width / 2.0)
+    setY distr_text ((fromIntegral screen_height / 2.0) + 100.0)
+    setAnchor distr_text 0.5 0.5
+    addChild stage distr_text
 
     Histogram histogram <- histogram 10_000 100 dists
 
     histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
-    histogram_texture <- histogram_plot histogram_data histogram_options
-
-    histogram_sprite <- newSprite histogram_texture
-    setProperty "x" histogram_sprite (floatAsVal $ fromIntegral screen_width / 2.0)
-    setProperty "y" histogram_sprite (floatAsVal 200.0)
-    setAnchor histogram_sprite 0.5
-    addChild app histogram_sprite
+    histogram_texture_jsval <- histogram_plot histogram_data histogram_options
+    let histogram_texture = fromJSVal histogram_texture_jsval :: Texture
+    histogram_sprite <- newSpriteFromTexture histogram_texture
+    setX histogram_sprite (fromIntegral screen_width / 2.0)
+    setY histogram_sprite 200.0
+    setAnchor histogram_sprite 0.5 0.5
+    addChild stage histogram_sprite
 
 
     let sample_button = Button {
