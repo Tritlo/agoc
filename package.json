@@ -38,7 +38,9 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -46,7 +48,9 @@
       "target": [
         {
           "target": "tar.gz",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "category": "Game",
@@ -64,6 +68,7 @@
     "steamworks.js": "^0.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1"
   }
