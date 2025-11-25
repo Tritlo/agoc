@@ -15,6 +15,9 @@ else
     PIXIJS_DIR="pixijs-ffi"
 fi
 
+echo "Updating package index..."
+wasm32-wasi-cabal update
+
 echo "Building pixijs-ffi-test with wasm32-wasi-cabal..."
 cd "$ROOT_DIR"
 wasm32-wasi-cabal build exe:pixijs-ffi-test
