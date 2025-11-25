@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pixijs-ffi Test Suite</title>
+
+  <!-- Load PixiJS -->
+  <script src="../vendor/pixi.js@8.0.0/dist/pixi.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-family: monospace;
+      background: #1a1a2e;
+      color: #eee;
+    }
+
+    #status {
+      padding: 20px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    #status h1 {
+      margin-bottom: 10px;
+      color: #e94560;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 400px;
+      background: #0f0f23;
+    }
+
+    #results {
+      padding: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .test-result {
+      padding: 4px 8px;
+      margin: 2px 0;
+      border-radius: 4px;
+    }
+
+    .test-pass {
+      background: rgba(0, 255, 0, 0.1);
+      border-left: 3px solid #0f0;
+    }
+
+    .test-fail {
+      background: rgba(255, 0, 0, 0.1);
+      border-left: 3px solid #f00;
+    }
+
+    .test-pending {
+      background: rgba(255, 255, 0, 0.1);
+      border-left: 3px solid #ff0;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">
+    <h1>pixijs-ffi Test Suite</h1>
+    <div id="loading-status">Loading WASM module...</div>
+  </div>
+  <div id="canvas-container"></div>
+  <div id="results"></div>
+
+  <script type="module">
+    import { WASI } from "../vendor/@runno/wasi@0.7.0/dist/wasi.js";
+    import ghc_wasm_jsffi from "../ghc_wasm_jsffi.js";
+
+    // Initialize test results storage
+    window.TEST_RESULTS = {};
+
+    // Make PIXI available globally
+    window.PIXI = PIXI;
+
+    const statusEl = document.getElementById('loading-status');
+    const resultsEl = document.getElementById('results');
+
+    function updateStatus(msg) {
+      statusEl.textContent = msg;
+      console.log(msg);
+    }
+
+    function displayResults() {
+      resultsEl.innerHTML = '';
+      const results = window.TEST_RESULTS;
+      const keys = Object.keys(results).sort();
+
+      let passed = 0;
+      let failed = 0;
+
+      for (const key of keys) {
+        const value = results[key];
+        const div = document.createElement('div');
+        div.className = 'test-result';
+
+        if (typeof value === 'boolean') {
+          if (value) {
+            div.className += ' test-pass';
+            div.textContent = `✓ ${key}`;
+            passed++;
+          } else {
+            div.className += ' test-fail';
+            div.textContent = `✗ ${key}`;
+            failed++;
+          }
+        } else {
+          div.className += ' test-pending';
+          div.textContent = `● ${key}: ${JSON.stringify(value)}`;
+        }
+
+        resultsEl.appendChild(div);
+      }
+
+      updateStatus(`Tests complete: ${passed} passed, ${failed} failed`);
+    }
+
+    // Expose display function globally
+    window.displayResults = displayResults;
+
+    async function init() {
+      if (!("WebAssembly" in window)) {
+        updateStatus('Error: WebAssembly not supported');
+        return;
+      }
+
+      const wasi = new WASI({
+        stdout: (out) => console.log("[wasm stdout]", out),
+        stderr: (out) => console.error("[wasm stderr]", out)
+      });
+
+      const jsffiExports = {};
+
+      try {
+        updateStatus('Creating JSFFI imports...');
+        const jsffiImports = ghc_wasm_jsffi(jsffiExports);
+
+        updateStatus('Getting WASI import object...');
+        const wasiImports = wasi.getImportObject();
+
+        const importObject = Object.assign(
+          { ghc_wasm_jsffi: jsffiImports },
+          wasiImports
+        );
+
+        updateStatus('Fetching and instantiating WASM...');
+        const result = await WebAssembly.instantiateStreaming(
+          fetch('../pixijs-ffi-test.wasm'),
+          importObject
+        );
+
+        if (!result || !result.instance) {
+          throw new Error('Failed to instantiate WASM');
+        }
+
+        const instance = result.instance;
+
+        // Fill in the jsffiExports
+        Object.assign(jsffiExports, instance.exports);
+
+        // Initialize WASI
+        updateStatus('Initializing WASI...');
+        wasi.initialize(result, {
+          ghc_wasm_jsffi: ghc_wasm_jsffi(jsffiExports)
+        });
+
+        // Call main to initialize the reactor
+        if (instance.exports.main) {
+          instance.exports.main();
+        }
+
+        updateStatus('WASM module loaded. Ready to run tests.');
+
+        // Expose test functions globally
+        window.runAllTests = instance.exports.runAllTests;
+        window.testApplication = instance.exports.testApplication;
+        window.testContainer = instance.exports.testContainer;
+        window.testSprite = instance.exports.testSprite;
+        window.testText = instance.exports.testText;
+        window.testGraphics = instance.exports.testGraphics;
+        window.testMath = instance.exports.testMath;
+        window.testEvents = instance.exports.testEvents;
+        window.testFilters = instance.exports.testFilters;
+        window.testTicker = instance.exports.testTicker;
+        window.testInterop = instance.exports.testInterop;
+
+        // Signal that we're ready
+        window.PIXIJS_FFI_TEST_READY = true;
+
+      } catch (error) {
+        updateStatus(`Error: ${error.message}`);
+        console.error('Error loading WASM:', error);
+        console.error('Stack:', error.stack);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

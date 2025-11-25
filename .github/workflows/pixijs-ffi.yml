@@ -1,0 +1,61 @@
+# Build and test pixijs-ffi
+name: pixijs-ffi
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'pixijs-ffi/**'
+      - '.github/workflows/pixijs-ffi.yml'
+  pull_request:
+    branches: ["main"]
+    paths:
+      - 'pixijs-ffi/**'
+      - '.github/workflows/pixijs-ffi.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache Nix store
+        uses: actions/cache@v4
+        with:
+          path: /nix/store
+          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-${{ runner.os }}-
+
+      - name: Vendor dependencies
+        run: |
+          nix develop --command bash -c "cd pixijs-ffi && ./vendor-deps.sh"
+
+      - name: Build pixijs-ffi-test WASM
+        run: |
+          nix develop --command bash -c "cd pixijs-ffi && ./build-pixijs-ffi-test.sh"
+
+      - name: Install Playwright
+        run: |
+          nix develop --command bash -c "cd pixijs-ffi && npm install --save-dev @playwright/test && npx playwright install chromium"
+
+      - name: Run Playwright tests
+        run: |
+          nix develop --command bash -c "cd pixijs-ffi && npx playwright test"
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pixijs-ffi-playwright-report
+          path: pixijs-ffi/playwright-report/
+          retention-days: 30

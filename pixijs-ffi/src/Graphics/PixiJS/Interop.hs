@@ -60,7 +60,8 @@ foreign import javascript "$1"
   intAsVal :: Int -> JSVal
 
 -- | Converts a Bool to a JavaScript value
-foreign import javascript "$1"
+-- Use Boolean() to ensure we get a proper JS boolean, not 0/1
+foreign import javascript "Boolean($1)"
   boolAsVal :: Bool -> JSVal
 
 -- | Converts a JSString to a JavaScript value

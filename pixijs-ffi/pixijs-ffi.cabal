@@ -46,3 +46,18 @@ library
         Graphics.PixiJS.Filters
         Graphics.PixiJS.Gamepad
         Graphics.PixiJS.Interop
+
+executable pixijs-ffi-test
+    import:           warnings
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        ghc-experimental,
+        pixijs-ffi
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings,
+        MultilineStrings
+    -- GHC options for reactor module: disable Haskell main, use reactor model, export main symbol
+    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=main -optc-Wno-main-return-type

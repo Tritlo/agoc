@@ -161,7 +161,7 @@ foreign import javascript unsafe "$1.left"
 
 -- | Gets the right edge of a rectangle
 foreign import javascript unsafe "$1.right"
-    getRectRight :: IO Float
+    getRectRight :: Rectangle -> IO Float
 
 -- | Gets the top edge of a rectangle
 foreign import javascript unsafe "$1.top"
@@ -260,20 +260,20 @@ foreign import javascript unsafe "$1.y"
 foreign import javascript unsafe "$1.y = $2"
     setEllipseY :: Ellipse -> Float -> IO ()
 
--- | Gets the horizontal radius of an ellipse
-foreign import javascript unsafe "$1.width"
+-- | Gets the horizontal radius of an ellipse (halfWidth in PixiJS v8)
+foreign import javascript unsafe "$1.halfWidth"
     getEllipseWidth :: Ellipse -> IO Float
 
--- | Sets the horizontal radius of an ellipse
-foreign import javascript unsafe "$1.width = $2"
+-- | Sets the horizontal radius of an ellipse (halfWidth in PixiJS v8)
+foreign import javascript unsafe "$1.halfWidth = $2"
     setEllipseWidth :: Ellipse -> Float -> IO ()
 
--- | Gets the vertical radius of an ellipse
-foreign import javascript unsafe "$1.height"
+-- | Gets the vertical radius of an ellipse (halfHeight in PixiJS v8)
+foreign import javascript unsafe "$1.halfHeight"
     getEllipseHeight :: Ellipse -> IO Float
 
--- | Sets the vertical radius of an ellipse
-foreign import javascript unsafe "$1.height = $2"
+-- | Sets the vertical radius of an ellipse (halfHeight in PixiJS v8)
+foreign import javascript unsafe "$1.halfHeight = $2"
     setEllipseHeight :: Ellipse -> Float -> IO ()
 
 -- | Checks if an ellipse contains a point

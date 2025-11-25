@@ -36,7 +36,6 @@ module Graphics.PixiJS.Filters
     ) where
 
 import Graphics.PixiJS.Types
-import GHC.Wasm.Prim
 
 -- *****************************************************************************
 -- * Filter Management
@@ -55,23 +54,25 @@ foreign import javascript unsafe "$1.filters"
 
 -- | Adds a filter to a display object
 --
--- This is a helper function that handles the array manipulation
+-- In PixiJS v8, filters must be set as a new array, not mutated
 foreign import javascript unsafe
     """
-    if (!$1.filters) {
-        $1.filters = [];
-    }
-    $1.filters.push($2);
+    const currentFilters = $1.filters || [];
+    $1.filters = [...currentFilters, $2];
     """
     addFilter :: JSVal -> Filter -> IO ()
 
--- | Removes a filter from a display object
+-- | Removes the first occurrence of a filter from a display object
+--
+-- In PixiJS v8, filters must be set as a new array, not mutated.
+-- Only removes the first match to preserve semantics when the same
+-- filter is added multiple times for stronger effects.
 foreign import javascript unsafe
     """
     if ($1.filters) {
-        const index = $1.filters.indexOf($2);
-        if (index > -1) {
-            $1.filters.splice(index, 1);
+        const idx = $1.filters.indexOf($2);
+        if (idx !== -1) {
+            $1.filters = [...$1.filters.slice(0, idx), ...$1.filters.slice(idx + 1)];
         }
     }
     """
