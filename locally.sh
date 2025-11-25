@@ -3,6 +3,9 @@
 
 set -e  # Exit on error
 
+echo "Updating package index..."
+wasm32-wasi-cabal update
+
 echo "Building with wasm32-wasi-cabal..."
 wasm32-wasi-cabal build exe:agoc
 
