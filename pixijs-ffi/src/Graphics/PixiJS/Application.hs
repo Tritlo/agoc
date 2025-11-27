@@ -25,6 +25,10 @@ module Graphics.PixiJS.Application
     , destroy
     , resize
     , render
+      -- * Ticker Control
+    , startTicker
+    , stopTicker
+    , addTickerCallback
     ) where
 
 import Graphics.PixiJS.Types

@@ -34,7 +34,6 @@ module Graphics.PixiJS.Ticker
     ) where
 
 import Graphics.PixiJS.Types
-import GHC.Wasm.Prim
 
 -- *****************************************************************************
 -- * Ticker Creation

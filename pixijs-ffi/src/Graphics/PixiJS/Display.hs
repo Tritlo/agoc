@@ -21,6 +21,7 @@ module Graphics.PixiJS.Display
       -- * Sprite
     , newSprite
     , newSpriteFromTexture
+    , fromImage
       -- * AnimatedSprite
     , newAnimatedSprite
     , playAnimatedSprite
@@ -85,7 +86,6 @@ module Graphics.PixiJS.Display
 
 import Graphics.PixiJS.Types
 import GHC.Wasm.Prim
-import Data.Coerce (coerce)
 
 -- *****************************************************************************
 -- * Container
@@ -230,7 +230,7 @@ foreign import javascript unsafe "PIXI.Sprite.from($1)"
 
 -- | Creates a new AnimatedSprite from a list of Textures
 newAnimatedSprite :: [Texture] -> IO AnimatedSprite
-newAnimatedSprite textures = do
+newAnimatedSprite _textures = do
     -- Convert list of textures to JS array (not implemented yet, using placeholder)
     -- For now, we assume textures is a JSVal representing an array
     -- TODO: Implement array conversion

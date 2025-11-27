@@ -7,10 +7,9 @@
 module Main where
 import Lib (blipWithFreq, histogram_plot, HistogramOptions(..), defaultHistogramOptions, closeWindow, initDiceRenderer, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
 import Graphics.PixiJS
-import GHC.Wasm.Prim
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
-import Control.Monad (when, forM_)
+import Control.Monad (when, forM_, void)
 import qualified System.Random.SplitMix.Distributions as D
 import Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
@@ -51,7 +50,7 @@ renderMenu menu = do
     setX container menu.menu_x
     setY container menu.menu_y
 
-    forM_ (zip [0..] menu.menu_items) $ \(idx, item) -> do
+    forM_ (zip [0 :: Int ..] menu.menu_items) $ \(idx, item) -> do
         text_obj <- newTextWithStyle (toJSString item.menuItem_text) (toJSString menu.menu_color)
         setEventMode text_obj "static"
         setCursor text_obj "pointer"
@@ -125,7 +124,7 @@ renderButton container button = do
     on "pointerout" button_text =<< jsFuncFromHs_
          (\_ -> do setPropertyKey ["style", "fill"] (toJSVal button_text) (stringAsVal "black"))
 
-    _ <- addChild container button_text
+    void $ addChild container button_text
     return ()
 
 data GameState = GameState {
@@ -152,7 +151,7 @@ validateDist :: Dist -> Bool
 validateDist (Uniform a b) = a < b
 validateDist (Exponential lambda) = lambda > 0
 validateDist (Gamma k theta) = k > 0 && theta > 0
-validateDist (Normal mean stddev) = stddev > 0
+validateDist (Normal _mean stddev) = stddev > 0
 
 
 sampleDist :: Monad m => Dist -> D.GenT m Double
@@ -191,20 +190,20 @@ instance ToJSON Histogram where
     toJSON (Histogram bins) = toJSON bins
 
 histogram :: Int -> Int -> Seq Dist -> IO Histogram
-histogram num_samples bins dists = do
-    samples <- D.samplesIO num_samples $ sampleDists dists
-    let (h_min, h_max) = (minimum samples, maximum samples)
-    let bin_width = (h_max - h_min) / fromIntegral bins
-    let bins' :: Double -> Double -> [Double] -> [(Int, Double)]
-        bins' !acc !h_cutoff [] = []
-        bins' !acc !h_cutoff !samples =
-            let (lt, rest) = partition (<= h_cutoff) samples
+histogram num_samples numBins dists = do
+    sampleData <- D.samplesIO num_samples $ sampleDists dists
+    let (h_min, h_max) = (minimum sampleData, maximum sampleData)
+    let bin_width = (h_max - h_min) / fromIntegral numBins
+    let makeBins :: Double -> Double -> [Double] -> [(Int, Double)]
+        makeBins !_acc !_cutoff [] = []
+        makeBins !acc !cutoff !remaining =
+            let (lt, rest) = partition (<= cutoff) remaining
                 len_lt = length lt
-                acc' = acc + (fromIntegral len_lt)
-                h_cutoff' = h_cutoff + bin_width
-            in  (len_lt, h_cutoff) : bins' acc' h_cutoff' rest
-        bins = bins' 0.0 (h_min  + bin_width) samples
-    return (Histogram bins)
+                acc' = acc + fromIntegral len_lt
+                cutoff' = cutoff + bin_width
+            in  (len_lt, cutoff) : makeBins acc' cutoff' rest
+        binData = makeBins 0.0 (h_min + bin_width) sampleData
+    return (Histogram binData)
 
 
 
@@ -331,7 +330,7 @@ playDiceAnimation diceRenderer _app container screenW screenH onComplete = do
     setX diceSprite startX
     setY diceSprite startY
     setAnchor diceSprite 0.5 0.5
-    _ <- addChild container diceSprite
+    void $ addChild container diceSprite
 
     -- Do initial render to the slot
     renderDiceFrame diceRenderer slotIndex 0 0 0 diceColor 6
@@ -385,7 +384,7 @@ playDiceAnimation diceRenderer _app container screenW screenH onComplete = do
         -- End after total duration (2 seconds)
         when (newElapsed >= totalDuration) $ do
             stop ticker
-            _ <- removeChild container diceSprite
+            void $ removeChild container diceSprite
             releaseDiceSlot diceRenderer slotIndex
             onComplete
 
@@ -406,8 +405,8 @@ updateScore game_state_ref score_text target_text distr_text histogram_sprite = 
         setText target_text (toJSString $ "Target: " ++ show new_target)
         setText distr_text (toJSString $ "X ~ " ++ showDists new_dists)
 
-        Histogram histogram <- histogram 10_000 100 new_dists
-        histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histogram)
+        Histogram histData <- histogram 10_000 100 new_dists
+        histogram_data <- parseJSON (toJSString $ BSC.unpack $ Aeson.encode histData)
         histogram_texture_jsval <- histogram_plot histogram_data histogram_options
         setProperty "texture" (toJSVal histogram_sprite) histogram_texture_jsval
 
@@ -437,26 +436,26 @@ renderGameScreen diceRenderer app screenContainer screen_width screen_height gam
     setX histogram_sprite (fromIntegral screen_width / 2.0)
     setY histogram_sprite 100.0
     setAnchor histogram_sprite 0.5 0.5
-    addChild screenContainer histogram_sprite
+    void $ addChild screenContainer histogram_sprite
 
     -- Game info in the middle
     target_text <- newTextWithStyle (toJSString $ "Target: " ++ show gs_target) "black"
     setX target_text (fromIntegral screen_width / 2.0)
     setY target_text (fromIntegral screen_height / 2.0 - 60.0)
     setAnchor target_text 0.5 0.5
-    addChild screenContainer target_text
+    void $ addChild screenContainer target_text
 
     score_text <- newTextWithStyle (toJSString $ "Score: " ++ show gs_score) "black"
     setX score_text (fromIntegral screen_width / 2.0)
     setY score_text (fromIntegral screen_height / 2.0)
     setAnchor score_text 0.5 0.5
-    addChild screenContainer score_text
+    void $ addChild screenContainer score_text
 
     distr_text <- newTextWithStyle (toJSString $ "X ∼ " ++ showDists gs_dists) "black"
     setX distr_text (fromIntegral screen_width / 2.0)
     setY distr_text (fromIntegral screen_height / 2.0 + 60.0)
     setAnchor distr_text 0.5 0.5
-    addChild screenContainer distr_text
+    void $ addChild screenContainer distr_text
 
     -- Buttons at the bottom
     let sample_button = Button {
@@ -490,7 +489,7 @@ renderPauseMenu :: Application -> Container -> Int -> Int
                 -> (IO ())  -- ^ Action to continue game
                 -> (IO ())  -- ^ Action to quit to start screen
                 -> IO ()
-renderPauseMenu app screenContainer screen_width screen_height continueGame quitGame = do
+renderPauseMenu _app screenContainer screen_width screen_height continueGame quitGame = do
     clearScreen screenContainer
 
     -- Title
@@ -498,7 +497,7 @@ renderPauseMenu app screenContainer screen_width screen_height continueGame quit
     setX title (fromIntegral screen_width / 2.0)
     setY title 150.0
     setAnchor title 0.5 0.5
-    addChild screenContainer title
+    void $ addChild screenContainer title
 
     -- Menu
     let pauseMenu = Menu {
@@ -514,7 +513,7 @@ renderPauseMenu app screenContainer screen_width screen_height continueGame quit
     }
 
     menuContainer <- renderMenu pauseMenu
-    _ <- addChild screenContainer menuContainer
+    void $ addChild screenContainer menuContainer
     return ()
 
 -- | Render the start screen with menu
@@ -522,7 +521,7 @@ renderStartScreen :: Application -> Container -> Int -> Int
                   -> (IO ())  -- ^ Action to show game screen
                   -> (IO ())  -- ^ Action to show options screen
                   -> IO ()
-renderStartScreen app screenContainer screen_width screen_height showGame showOptions = do
+renderStartScreen _app screenContainer screen_width screen_height showGame showOptions = do
     clearScreen screenContainer
 
     -- Title
@@ -530,7 +529,7 @@ renderStartScreen app screenContainer screen_width screen_height showGame showOp
     setX title (fromIntegral screen_width / 2.0)
     setY title 150.0
     setAnchor title 0.5 0.5
-    addChild screenContainer title
+    void $ addChild screenContainer title
 
     -- Menu
     let startMenu = Menu {
@@ -547,14 +546,14 @@ renderStartScreen app screenContainer screen_width screen_height showGame showOp
     }
 
     menuContainer <- renderMenu startMenu
-    _ <- addChild screenContainer menuContainer
+    void $ addChild screenContainer menuContainer
     return ()
 
 -- | Render the options screen
 renderOptionsScreen :: Application -> Container -> Int -> Int
                     -> (IO ())  -- ^ Action to go back to start screen
                     -> IO ()
-renderOptionsScreen app screenContainer screen_width screen_height goBack = do
+renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
     clearScreen screenContainer
 
     -- Title
@@ -562,14 +561,14 @@ renderOptionsScreen app screenContainer screen_width screen_height goBack = do
     setX title (fromIntegral screen_width / 2.0)
     setY title 150.0
     setAnchor title 0.5 0.5
-    addChild screenContainer title
+    void $ addChild screenContainer title
 
     -- Placeholder text
     placeholder <- newTextWithStyle (toJSString "(No options yet)") "gray"
     setX placeholder (fromIntegral screen_width / 2.0)
     setY placeholder (fromIntegral screen_height / 2.0 - 50.0)
     setAnchor placeholder 0.5 0.5
-    addChild screenContainer placeholder
+    void $ addChild screenContainer placeholder
 
     -- Back menu
     let backMenu = Menu {
@@ -584,7 +583,7 @@ renderOptionsScreen app screenContainer screen_width screen_height goBack = do
     }
 
     menuContainer <- renderMenu backMenu
-    _ <- addChild screenContainer menuContainer
+    void $ addChild screenContainer menuContainer
     return ()
 
 -- | Initial game state
@@ -607,7 +606,7 @@ main = do
     -- Create screen container that will hold all screen content
     screenContainer <- newContainer
     stage <- getStage app
-    addChild stage screenContainer
+    void $ addChild stage screenContainer
 
     -- Initialize game state
     game_state_ref <- newIORef initialGameState

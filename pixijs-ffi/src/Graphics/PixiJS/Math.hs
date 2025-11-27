@@ -69,7 +69,6 @@ module Graphics.PixiJS.Math
     ) where
 
 import Graphics.PixiJS.Types
-import GHC.Wasm.Prim
 
 -- *****************************************************************************
 -- * Point
