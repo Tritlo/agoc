@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, histogram_plot, HistogramOptions(..), defaultHistogramOptions, closeWindow)
+import Lib (blipWithFreq, histogram_plot, HistogramOptions(..), defaultHistogramOptions, closeWindow, initDiceRenderer, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
 import Graphics.PixiJS
 import GHC.Wasm.Prim
 import Data.String (IsString(..))
@@ -18,6 +18,8 @@ import Data.Aeson (ToJSON(..))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BSC
 import Data.List (partition)
+import System.Random (randomRIO)
+import Numeric (showHex)
 
 -- Export the actual initialization function
 foreign export javascript "main" main :: IO ()
@@ -223,6 +225,173 @@ histogram_options = defaultHistogramOptions {
     ho_marginBottom = 25
 }
 
+-- | Helper to convert Int to 2-digit hex string
+toHex :: Int -> String
+toHex n = let h = showHex n "" in if length h == 1 then '0':h else h
+
+-- | Play a spinning dice animation with randomized trajectory
+-- Uses time-based animation (2 seconds total) with exact final face landing
+-- Each animation gets its own slot in the spritesheet for concurrent animations
+playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> IO () -> IO ()
+playDiceAnimation diceRenderer _app container screenW screenH onComplete = do
+    -- Acquire a slot for this animation
+    slotIndex <- acquireDiceSlot diceRenderer
+
+    -- Generate random final face (1-6)
+    finalFace <- randomRIO (1, 6) :: IO Int
+
+    -- Random bounce parameters for variety
+    bounceFreq <- randomRIO (30.0, 50.0) :: IO Float
+    bounceAmp <- randomRIO (6.0, 12.0) :: IO Float
+
+    -- Random start position (around sample button)
+    startXOffset <- randomRIO (-50.0, 50.0) :: IO Float
+    startYOffset <- randomRIO (-30.0, 30.0) :: IO Float
+
+    -- Random end position (around center)
+    endXOffset <- randomRIO (-60.0, 60.0) :: IO Float
+    endYOffset <- randomRIO (-40.0, 40.0) :: IO Float
+
+    -- Random number of full rotations per axis (1-6)
+    numRotsX <- randomRIO (1, 6) :: IO Int
+    numRotsY <- randomRIO (1, 6) :: IO Int
+    numRotsZ <- randomRIO (1, 6) :: IO Int
+
+    -- Muted colors: moderate contrast between channels
+    colorType <- randomRIO (0, 5) :: IO Int
+    (r, g, b) <- case colorType of
+        0 -> do  -- Muted Red
+            r' <- randomRIO (180, 220) :: IO Int
+            g' <- randomRIO (100, 140) :: IO Int
+            b' <- randomRIO (100, 140) :: IO Int
+            return (r', g', b')
+        1 -> do  -- Muted Green
+            r' <- randomRIO (100, 140) :: IO Int
+            g' <- randomRIO (180, 220) :: IO Int
+            b' <- randomRIO (100, 140) :: IO Int
+            return (r', g', b')
+        2 -> do  -- Muted Blue
+            r' <- randomRIO (100, 140) :: IO Int
+            g' <- randomRIO (100, 140) :: IO Int
+            b' <- randomRIO (180, 220) :: IO Int
+            return (r', g', b')
+        3 -> do  -- Muted Yellow (red + green)
+            r' <- randomRIO (180, 220) :: IO Int
+            g' <- randomRIO (180, 220) :: IO Int
+            b' <- randomRIO (100, 140) :: IO Int
+            return (r', g', b')
+        4 -> do  -- Muted Magenta (red + blue)
+            r' <- randomRIO (180, 220) :: IO Int
+            g' <- randomRIO (100, 140) :: IO Int
+            b' <- randomRIO (180, 220) :: IO Int
+            return (r', g', b')
+        _ -> do  -- Muted Cyan (green + blue)
+            r' <- randomRIO (100, 140) :: IO Int
+            g' <- randomRIO (180, 220) :: IO Int
+            b' <- randomRIO (180, 220) :: IO Int
+            return (r', g', b')
+    let diceColor = fromString $ "0x" ++ toHex r ++ toHex g ++ toHex b
+
+    -- Fixed timing (2 seconds total)
+    let rollDuration = 1.5 :: Float    -- seconds
+        totalDuration = 2.0 :: Float   -- seconds (includes 0.5s hold)
+
+    let centerX = fromIntegral screenW / 2
+        centerY = fromIntegral screenH / 2
+        buttonY = fromIntegral screenH - 150
+
+        startX = centerX + startXOffset
+        startY = buttonY + startYOffset
+        endX = centerX + endXOffset
+        endY = centerY + endYOffset
+
+        -- Target rotation to land on specific face
+        -- BoxGeometry face order: +X(3), -X(4), +Y(1), -Y(6), +Z(2), -Z(5)
+        -- At rotation (0,0,0): face 1 is on +Y (top), face 6 on -Y (bottom)
+        -- Camera is at (0, 5, 0) looking at origin, so +Y faces camera
+        -- We want the target face to be on +Y after rotation
+        (faceRotX, faceRotY, faceRotZ) = case finalFace of
+            1 -> (0, 0, 0)           -- Face 1 already on +Y
+            6 -> (pi, 0, 0)          -- Flip around X to bring -Y to +Y
+            2 -> (-pi/2, 0, 0)       -- Face 2 on +Z, rotate -90° around X
+            5 -> (pi/2, 0, 0)        -- Face 5 on -Z, rotate +90° around X
+            3 -> (0, 0, pi/2)        -- Face 3 on +X, rotate +90° around Z
+            _ -> (0, 0, -pi/2)       -- Face 4 on -X, rotate -90° around Z
+
+        -- Total rotation = full rotations + face offset
+        -- This guarantees we land exactly on the target face
+        totalRotX = fromIntegral numRotsX * 2 * pi + faceRotX
+        totalRotY = fromIntegral numRotsY * 2 * pi + faceRotY
+        totalRotZ = fromIntegral numRotsZ * 2 * pi + faceRotZ
+
+    -- Get a texture for this slot and create sprite
+    slotTextureVal <- getDiceSlotTexture diceRenderer slotIndex
+    let slotTexture = fromJSVal slotTextureVal :: Texture
+    diceSprite <- newSpriteFromTexture slotTexture
+    setX diceSprite startX
+    setY diceSprite startY
+    setAnchor diceSprite 0.5 0.5
+    _ <- addChild container diceSprite
+
+    -- Do initial render to the slot
+    renderDiceFrame diceRenderer slotIndex 0 0 0 diceColor 6
+
+    -- Create dedicated ticker for this animation
+    animTicker <- newTicker
+    setMaxFPS animTicker 60
+
+    -- Track elapsed time
+    elapsedRef <- newIORef (0.0 :: Float)
+
+    -- Add callback using time-based animation
+    tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
+        let ticker = fromJSVal tickerVal :: Ticker
+
+        -- Get delta time from ticker (in ms, convert to seconds)
+        deltaMs <- getDeltaMS ticker
+        let deltaS = deltaMs / 1000.0
+
+        elapsed <- readIORef elapsedRef
+        let newElapsed = elapsed + deltaS
+        writeIORef elapsedRef newElapsed
+
+        -- t is progress through roll phase (0 to 1), clamped at 1
+        let t = min 1.0 (newElapsed / rollDuration) :: Float
+
+            -- Simple linear interpolation: at t=1.0, we're exactly at totalRot
+            -- Use ease-out for visual appeal (fast start, slow end)
+            tEased = if t >= 1.0 then 1.0 else 1.0 - (1.0 - t) ** 3
+
+            -- Current rotation = progress * total rotation
+            rotX = tEased * totalRotX
+            rotY = tEased * totalRotY
+            rotZ = tEased * totalRotZ
+
+            -- Position: ease-out quadratic for movement
+            posEased = 1.0 - (1.0 - t) ** 2
+            currentX = startX + (endX - startX) * posEased
+            currentY = startY + (endY - startY) * posEased
+
+            -- Bounce near end of roll (not during hold)
+            bounce = if t > 0.85 && t < 1.0
+                     then sin ((t - 0.85) * bounceFreq) * bounceAmp * (1.0 - t) * 6.67
+                     else 0
+
+        -- Update dice in this slot
+        renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6
+        setX diceSprite currentX
+        setY diceSprite (currentY + bounce)
+
+        -- End after total duration (2 seconds)
+        when (newElapsed >= totalDuration) $ do
+            stop ticker
+            _ <- removeChild container diceSprite
+            releaseDiceSlot diceRenderer slotIndex
+            onComplete
+
+    add animTicker tickerCallback
+    start animTicker
+
 updateScore :: IORef GameState -> Text -> Text -> Text -> Sprite -> IO ()
 updateScore game_state_ref score_text target_text distr_text histogram_sprite = do
     game_state@GameState{..} <- readIORef game_state_ref
@@ -251,10 +420,10 @@ updateScore game_state_ref score_text target_text distr_text histogram_sprite = 
 -- *****************************************************************************
 
 -- | Render the game screen (the main gameplay)
-renderGameScreen :: Application -> Container -> Int -> Int -> IORef GameState
+renderGameScreen :: JSVal -> Application -> Container -> Int -> Int -> IORef GameState
                  -> (IO ())  -- ^ Action to show pause menu
                  -> IO ()
-renderGameScreen app screenContainer screen_width screen_height game_state_ref showPauseMenu = do
+renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref showPauseMenu = do
     clearScreen screenContainer
 
     GameState{..} <- readIORef game_state_ref
@@ -298,8 +467,10 @@ renderGameScreen app screenContainer screen_width screen_height game_state_ref s
         button_height = 100.0,
         button_color = "black",
         button_on_click =
-             \_ ->
-                updateScore game_state_ref score_text target_text distr_text histogram_sprite
+             \_ -> do
+                let onDiceComplete =
+                        updateScore game_state_ref score_text target_text distr_text histogram_sprite
+                playDiceAnimation diceRenderer app screenContainer screen_width screen_height onDiceComplete
     }
     renderButton screenContainer sample_button
 
@@ -441,6 +612,9 @@ main = do
     -- Initialize game state
     game_state_ref <- newIORef initialGameState
 
+    -- Initialize persistent dice renderer (single WebGL context for all dice animations)
+    diceRenderer <- initDiceRenderer 128
+
     -- Define screen transition functions using mutual recursion via IORefs
     showStartScreenRef <- newIORef (return () :: IO ())
     showOptionsScreenRef <- newIORef (return () :: IO ())
@@ -478,7 +652,7 @@ main = do
             showStartScreen
 
     writeIORef showGameScreenRef $
-        renderGameScreen app screenContainer screen_width screen_height game_state_ref
+        renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref
             showPauseMenu
 
     writeIORef showPauseMenuRef $

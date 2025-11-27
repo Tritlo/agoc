@@ -313,7 +313,7 @@ test.describe('Menu System', () => {
     // Click Sample button to change score
     const sampleButtonY = boundingBox.y + boundingBox.height - 150;
     await page.mouse.click(centerX, sampleButtonY);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(2500); // Wait for dice animation to complete (fixed 2 seconds)
 
     // Click Menu button
     const menuButtonY = boundingBox.y + boundingBox.height - 80;

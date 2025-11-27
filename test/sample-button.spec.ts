@@ -59,8 +59,9 @@ test.describe('Sample Button', () => {
 
     await page.mouse.click(clickX, clickY);
 
-    // Wait for the state to update
-    await page.waitForTimeout(500);
+    // Wait for the dice animation to complete and state to update
+    // Animation: fixed 2 seconds total (1.5s roll + 0.5s hold)
+    await page.waitForTimeout(2500);
 
     // Get the new score
     const newScore = await getScoreText();

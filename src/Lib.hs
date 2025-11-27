@@ -15,6 +15,12 @@ module Lib
     , getFirstGamepad
     , getGamepadAxis
     , isGamepadButtonPressed
+      -- * Dice Rendering
+    , initDiceRenderer
+    , renderDiceFrame
+    , acquireDiceSlot
+    , releaseDiceSlot
+    , getDiceSlotTexture
       -- * Window Management
     , closeWindow
     ) where
@@ -284,6 +290,336 @@ foreign import javascript unsafe
 -- @return True if button is pressed, False otherwise
 foreign import javascript unsafe "($1 && $1.buttons && $1.buttons[$2]) ? $1.buttons[$2].pressed : false"
     isGamepadButtonPressed :: JSVal -> Int -> IO Bool
+
+-- *****************************************************************************
+-- * Dice Rendering (Three.js)
+-- *****************************************************************************
+
+-- | Initialize a persistent dice renderer context.
+-- Returns a renderer handle that should be reused for all dice rendering.
+-- Parameters:
+--   $1: canvas size (width and height, square)
+foreign import javascript safe
+  """
+  (() => {
+    const size = $1;
+    const initialSlots = 20;
+    const slotPadding = 5;  // Padding between slots to prevent texture sampling bleed
+    const slotStride = size + slotPadding;
+
+    // Create offscreen canvas (persistent) - start with 20 slots to avoid lag
+    const canvas = new OffscreenCanvas(slotStride * initialSlots, size);
+
+    // Create Three.js renderer (persistent)
+    const renderer = new THREE.WebGLRenderer({
+      canvas: canvas,
+      antialias: true,
+      alpha: true
+    });
+    renderer.setSize(slotStride * initialSlots, size, false);
+    renderer.setClearColor(0x000000, 0);
+
+    // Create scene (persistent)
+    const scene = new THREE.Scene();
+
+    // Create camera (persistent)
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+    camera.position.z = 3;
+
+    // Add lighting (persistent)
+    const ambientLight = new THREE.AmbientLight(0x404040, 2);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
+
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight2.position.set(-1, -1, 1);
+    scene.add(directionalLight2);
+
+    // Helper function to create a texture with a number for D6 faces
+    const createD6FaceTexture = (number, bgColor, textColor) => {
+      const faceCanvas = new OffscreenCanvas(128, 128);
+      const ctx = faceCanvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, 128, 128);
+
+      // Number
+      ctx.fillStyle = textColor;
+      ctx.font = 'bold 72px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(number.toString(), 64, 68);
+
+      return new THREE.CanvasTexture(faceCanvas);
+    };
+
+    // Create D6 face materials (numbers 1-6)
+    // Face order for BoxGeometry: +X, -X, +Y, -Y, +Z, -Z
+    // Standard dice: opposite faces sum to 7 (1/6, 2/5, 3/4)
+    const d6FaceNumbers = [3, 4, 1, 6, 2, 5]; // Adjusted for correct opposite faces
+    const d6Materials = d6FaceNumbers.map(num =>
+      new THREE.MeshPhongMaterial({
+        map: createD6FaceTexture(num, '#ffffff', '#333333'),
+        shininess: 30
+      })
+    );
+
+    // Create initial dice mesh with D6 materials
+    let currentGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const dice = new THREE.Mesh(currentGeometry, d6Materials);
+    scene.add(dice);
+
+    // Add dark edge lines for 3D definition
+    const edgeGeometry = new THREE.EdgesGeometry(currentGeometry);
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x333333 });
+    let edgeLines = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    dice.add(edgeLines);
+
+    // Store current dice type to avoid recreating geometry unnecessarily
+    let currentDiceType = 6;
+
+    // Slot pool management for concurrent dice animations
+    const slotSize = size;
+    let numSlots = initialSlots;
+    const freeSlots = Array.from({length: initialSlots}, (_, i) => i);  // [0, 1, ..., 19]
+    const stride = slotStride;  // slotSize + padding
+
+    // Clear entire canvas to transparent to prevent uninitialized white pixels
+    const gl = renderer.getContext();
+    renderer.setScissorTest(false);  // Disable scissor to clear entire canvas
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Do an initial render so the canvas has content
+    renderer.render(scene, camera);
+
+    // Create a persistent PixiJS texture from the canvas (created ONCE)
+    // This avoids PixiJS texture caching issues - we'll update this texture each frame
+    const texture = PIXI.Texture.from(canvas);
+
+    // Use nearest filtering to prevent sub-pixel sampling at edges
+    texture.source.scaleMode = 'nearest';
+
+    // Return renderer context object
+    return {
+      canvas,
+      renderer,
+      scene,
+      camera,
+      dice,
+      d6Materials,
+      currentGeometry,
+      currentDiceType,
+      edgeLines,
+      texture,
+      slotSize,
+      stride,
+      numSlots,
+      freeSlots
+    };
+  })()
+  """
+    initDiceRenderer :: Int -> IO JSVal
+
+-- | Render a dice frame to a specific slot using an existing renderer context.
+-- Parameters:
+--   $1: renderer context (from initDiceRenderer)
+--   $2: slot index (from acquireDiceSlot)
+--   $3: rotation X (radians)
+--   $4: rotation Y (radians)
+--   $5: rotation Z (radians)
+--   $6: dice color (hex string like "0xffffff") - used for non-D6 dice
+--   $7: dice type (4=D4, 6=D6, 8=D8, 12=D12, 20=D20)
+foreign import javascript safe
+  """
+  (() => {
+    const ctx = $1;
+    const slotIndex = $2;
+    const rotX = $3;
+    const rotY = $4;
+    const rotZ = $5;
+    const color = parseInt($6);
+    const diceType = $7;
+
+    // Update dice type if changed
+    if (ctx.currentDiceType !== diceType) {
+      // Remove old geometry
+      ctx.currentGeometry.dispose();
+
+      // Create new geometry based on dice type
+      let geometry;
+      let material;
+      switch (diceType) {
+        case 4:
+          geometry = new THREE.TetrahedronGeometry(1);
+          material = new THREE.MeshPhongMaterial({ color: color, flatShading: true, shininess: 30 });
+          break;
+        case 8:
+          geometry = new THREE.OctahedronGeometry(1);
+          material = new THREE.MeshPhongMaterial({ color: color, flatShading: true, shininess: 30 });
+          break;
+        case 12:
+          geometry = new THREE.DodecahedronGeometry(1);
+          material = new THREE.MeshPhongMaterial({ color: color, flatShading: true, shininess: 30 });
+          break;
+        case 20:
+          geometry = new THREE.IcosahedronGeometry(1);
+          material = new THREE.MeshPhongMaterial({ color: color, flatShading: true, shininess: 30 });
+          break;
+        case 6:
+        default:
+          geometry = new THREE.BoxGeometry(1, 1, 1);
+          // Create D6 materials with the provided color as background
+          const hexColor = color.toString(16).padStart(6, '0');
+          const bgColor = '#' + hexColor;
+          const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
+          material = d6FaceNumbers.map(num => {
+            const faceCanvas = new OffscreenCanvas(128, 128);
+            const faceCtx = faceCanvas.getContext('2d');
+            faceCtx.fillStyle = bgColor;
+            faceCtx.fillRect(0, 0, 128, 128);
+            // White text with dark outline for visibility
+            faceCtx.font = 'bold 72px Arial';
+            faceCtx.textAlign = 'center';
+            faceCtx.textBaseline = 'middle';
+            faceCtx.strokeStyle = '#000000';
+            faceCtx.lineWidth = 3;
+            faceCtx.strokeText(num.toString(), 64, 68);
+            faceCtx.fillStyle = '#ffffff';
+            faceCtx.fillText(num.toString(), 64, 68);
+            return new THREE.MeshBasicMaterial({
+              map: new THREE.CanvasTexture(faceCanvas)
+            });
+          });
+          break;
+      }
+
+      ctx.dice.geometry = geometry;
+      ctx.dice.material = material;
+      ctx.currentGeometry = geometry;
+      ctx.currentDiceType = diceType;
+
+      // Update edge lines for new geometry
+      ctx.dice.remove(ctx.edgeLines);
+      ctx.edgeLines.geometry.dispose();
+      const newEdgeGeometry = new THREE.EdgesGeometry(geometry);
+      ctx.edgeLines = new THREE.LineSegments(newEdgeGeometry, new THREE.LineBasicMaterial({ color: 0x333333 }));
+      ctx.dice.add(ctx.edgeLines);
+    }
+
+    // For D6, always update materials with current color (since color can change each frame)
+    if (diceType === 6) {
+      const hexColor = color.toString(16).padStart(6, '0');
+      const bgColor = '#' + hexColor;
+      const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
+      const newMaterials = d6FaceNumbers.map(num => {
+        const faceCanvas = new OffscreenCanvas(128, 128);
+        const faceCtx = faceCanvas.getContext('2d');
+        faceCtx.fillStyle = bgColor;
+        faceCtx.fillRect(0, 0, 128, 128);
+        // White text with dark outline for visibility
+        faceCtx.font = 'bold 72px Arial';
+        faceCtx.textAlign = 'center';
+        faceCtx.textBaseline = 'middle';
+        faceCtx.strokeStyle = '#000000';
+        faceCtx.lineWidth = 3;
+        faceCtx.strokeText(num.toString(), 64, 68);
+        faceCtx.fillStyle = '#ffffff';
+        faceCtx.fillText(num.toString(), 64, 68);
+        return new THREE.MeshBasicMaterial({
+          map: new THREE.CanvasTexture(faceCanvas)
+        });
+      });
+      ctx.dice.material = newMaterials;
+    }
+
+    // Update rotation
+    ctx.dice.rotation.x = rotX;
+    ctx.dice.rotation.y = rotY;
+    ctx.dice.rotation.z = rotZ;
+
+    // Set viewport and scissor to render only to this slot's region
+    const slotX = slotIndex * ctx.stride;
+    ctx.renderer.setViewport(slotX, 0, ctx.slotSize, ctx.slotSize);
+    ctx.renderer.setScissor(slotX, 0, ctx.slotSize, ctx.slotSize);
+    ctx.renderer.setScissorTest(true);
+
+    // Clear this slot region before rendering
+    ctx.renderer.clear();
+
+    // Render Three.js scene to the slot region
+    ctx.renderer.render(ctx.scene, ctx.camera);
+
+    // Force PixiJS to re-read the canvas content
+    ctx.texture.source.update();
+  })()
+  """
+    renderDiceFrame :: JSVal    -- ^ Renderer context
+                    -> Int      -- ^ Slot index
+                    -> Float    -- ^ Rotation X (radians)
+                    -> Float    -- ^ Rotation Y (radians)
+                    -> Float    -- ^ Rotation Z (radians)
+                    -> JSString -- ^ Dice color (e.g., "0xffffff") - used for non-D6 dice
+                    -> Int      -- ^ Dice type (4, 6, 8, 12, or 20)
+                    -> IO ()
+
+-- | Acquire a dice slot from the pool for a new animation.
+-- Returns the slot index. Grows the canvas if no slots are available.
+foreign import javascript safe
+  """
+  (() => {
+    const ctx = $1;
+
+    if (ctx.freeSlots.length === 0) {
+      // Grow canvas horizontally to add a new slot
+      ctx.numSlots++;
+      ctx.canvas.width = ctx.stride * ctx.numSlots;
+
+      // Resize the WebGL renderer to match
+      ctx.renderer.setSize(ctx.stride * ctx.numSlots, ctx.slotSize, false);
+
+      // Add the new slot to the free pool
+      ctx.freeSlots.push(ctx.numSlots - 1);
+
+      // Update the existing texture source instead of destroying it
+      // This keeps existing sprites working while allowing new ones to use the expanded canvas
+      ctx.texture.source.resize(ctx.stride * ctx.numSlots, ctx.slotSize);
+      ctx.texture.source.update();
+    }
+
+    return ctx.freeSlots.pop();
+  })()
+  """
+    acquireDiceSlot :: JSVal -> IO Int
+
+-- | Release a dice slot back to the pool after animation completes.
+foreign import javascript unsafe
+  """
+  $1.freeSlots.push($2);
+  """
+    releaseDiceSlot :: JSVal -> Int -> IO ()
+
+-- | Get a PixiJS texture for a specific dice slot.
+-- Returns a texture with a frame rectangle that views only that slot's region.
+foreign import javascript safe
+  """
+  (() => {
+    const ctx = $1;
+    const slotIndex = $2;
+
+    const frame = new PIXI.Rectangle(
+      slotIndex * ctx.stride, 0,
+      ctx.slotSize, ctx.slotSize
+    );
+
+    return new PIXI.Texture({ source: ctx.texture.source, frame: frame });
+  })()
+  """
+    getDiceSlotTexture :: JSVal -> Int -> IO JSVal
 
 -- *****************************************************************************
 -- * Window Management

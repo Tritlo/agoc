@@ -11,6 +11,15 @@
   <meta property="og:image" content="./preview.png">
   <meta property="og:description" content="A demo showcasing running Haskell code compiled to WebAssembly using the GHC WASM backend. Functional programming in the browser with full access to JavaScript APIs through FFI.">
   <meta property="og:site_name" content="AGoC">
+  <!-- Import map for ES modules -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three@0.181.0/build/three.module.min.js"
+      }
+    }
+  </script>
+
   <!-- Load PixiJS (vendored) -->
   <script src="./vendor/pixi.js@8.0.0/dist/pixi.min.js"></script>
   <script src="./vendor/d3/d3.min.js"></script>
@@ -50,6 +59,10 @@
   <script type="module">
     import { WASI } from "./vendor/@runno/wasi@0.7.0/dist/wasi.js";
     import ghc_wasm_jsffi from "./ghc_wasm_jsffi.js";
+    import * as THREE from 'three';
+
+    // Make Three.js available globally for WASM FFI
+    window.THREE = THREE;
 
     // Initialize Steamworks if available (Electron context)
     let steamworksReady = false;
