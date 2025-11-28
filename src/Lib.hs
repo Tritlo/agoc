@@ -28,6 +28,10 @@ module Lib
       -- * Local Storage
     , localStorageGet
     , localStorageSet
+      -- * Dice Spritesheet Generation
+    , generateDiceSpritesheet
+    , getAnimationFrames
+    , newAnimatedSpriteFromJSArray
     ) where
 
 import GHC.Wasm.Prim
@@ -715,3 +719,211 @@ foreign import javascript unsafe "localStorage.getItem($1) || ''"
 -- | Set a value in localStorage
 foreign import javascript unsafe "localStorage.setItem($1, $2)"
     localStorageSet :: JSString -> JSString -> IO ()
+
+-- *****************************************************************************
+-- * Dice Spritesheet Generation
+-- *****************************************************************************
+
+-- | Generate a spritesheet containing all dice animation frames.
+-- Creates 540 frames: 3 variants × 6 faces × 30 frames per animation.
+-- Returns a spritesheet context object containing:
+--   - texture: PixiJS texture from the 2048×2048 canvas
+--   - framesPerAnimation: 30
+--   - variants: 3
+--   - faces: 6
+foreign import javascript safe
+  """
+  (async () => {
+    const frameSize = 64;
+    const framesPerAnimation = 30;
+    const variants = 3;
+    const faces = 6;
+    const totalFrames = framesPerAnimation * variants * faces;  // 540
+
+    const slotsPerRow = 32;
+    const canvasSize = 2048;
+
+    // Create the spritesheet canvas
+    const spritesheetCanvas = new OffscreenCanvas(canvasSize, canvasSize);
+    const ctx2d = spritesheetCanvas.getContext('2d');
+
+    // Create Three.js renderer for generating frames
+    const renderCanvas = new OffscreenCanvas(frameSize, frameSize);
+    const renderer = new THREE.WebGLRenderer({
+      canvas: renderCanvas,
+      antialias: true,
+      alpha: true
+    });
+    renderer.setSize(frameSize, frameSize, false);
+    renderer.setClearColor(0x000000, 0);
+
+    // Create scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+    camera.position.z = 3;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 2);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight2.position.set(-1, -1, 1);
+    scene.add(directionalLight2);
+
+    // Create D6 face textures (white background, black numbers for tinting)
+    const createD6FaceTexture = (number) => {
+      const faceCanvas = new OffscreenCanvas(64, 64);
+      const faceCtx = faceCanvas.getContext('2d');
+      faceCtx.fillStyle = '#ffffff';
+      faceCtx.fillRect(0, 0, 64, 64);
+      faceCtx.fillStyle = '#000000';
+      faceCtx.font = 'bold 36px Arial';
+      faceCtx.textAlign = 'center';
+      faceCtx.textBaseline = 'middle';
+      faceCtx.fillText(number.toString(), 32, 34);
+      return new THREE.CanvasTexture(faceCanvas);
+    };
+
+    // D6 face order for BoxGeometry: +X, -X, +Y, -Y, +Z, -Z
+    const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
+    const d6Materials = d6FaceNumbers.map(num =>
+      new THREE.MeshBasicMaterial({ map: createD6FaceTexture(num) })
+    );
+
+    // Create dice mesh
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const dice = new THREE.Mesh(geometry, d6Materials);
+    scene.add(dice);
+
+    // Add edge lines for definition
+    const edgeGeometry = new THREE.EdgesGeometry(geometry);
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x333333 });
+    const edgeLines = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    dice.add(edgeLines);
+
+    // Target rotations for each final face (camera at z=3 looking at origin)
+    const faceRotations = {
+      1: [Math.PI/2, 0, 0],      // Face 1 on +Y
+      2: [0, 0, 0],              // Face 2 on +Z
+      3: [0, -Math.PI/2, 0],     // Face 3 on +X
+      4: [0, Math.PI/2, 0],      // Face 4 on -X
+      5: [Math.PI, 0, 0],        // Face 5 on -Z
+      6: [-Math.PI/2, 0, 0]      // Face 6 on -Y
+    };
+
+    // Variant rotation multipliers (2, 3, 4 full spins)
+    const variantSpins = [2, 3, 4];
+
+    let frameIndex = 0;
+
+    // Generate all frames
+    for (let face = 1; face <= faces; face++) {
+      const [faceRotX, faceRotY, faceRotZ] = faceRotations[face];
+
+      for (let variant = 0; variant < variants; variant++) {
+        const spins = variantSpins[variant];
+
+        for (let frame = 0; frame < framesPerAnimation; frame++) {
+          // t goes from 0 to 1 over the animation
+          const t = frame / (framesPerAnimation - 1);
+          // Ease-out cubic for smooth deceleration
+          const tEased = 1.0 - Math.pow(1.0 - t, 3);
+
+          // Total rotation = full spins + face offset
+          const totalRotX = spins * 2 * Math.PI + faceRotX;
+          const totalRotY = spins * 2 * Math.PI + faceRotY;
+          const totalRotZ = spins * 2 * Math.PI + faceRotZ;
+
+          // Current rotation
+          dice.rotation.x = tEased * totalRotX;
+          dice.rotation.y = tEased * totalRotY;
+          dice.rotation.z = tEased * totalRotZ;
+
+          // Render frame
+          renderer.clear();
+          renderer.render(scene, camera);
+
+          // Calculate position in spritesheet
+          const col = frameIndex % slotsPerRow;
+          const row = Math.floor(frameIndex / slotsPerRow);
+          const x = col * frameSize;
+          const y = row * frameSize;
+
+          // Copy rendered frame to spritesheet
+          ctx2d.drawImage(renderCanvas, x, y);
+
+          frameIndex++;
+        }
+      }
+    }
+
+    // Clean up Three.js resources
+    renderer.dispose();
+    geometry.dispose();
+    edgeGeometry.dispose();
+    edgeMaterial.dispose();
+    d6Materials.forEach(m => {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    });
+
+    // Create PixiJS texture from spritesheet
+    const texture = PIXI.Texture.from(spritesheetCanvas);
+    texture.source.scaleMode = 'nearest';
+
+    return {
+      texture,
+      canvas: spritesheetCanvas,
+      frameSize,
+      framesPerAnimation,
+      variants,
+      faces,
+      slotsPerRow
+    };
+  })()
+  """
+    generateDiceSpritesheet :: IO JSVal
+
+-- | Get animation frames for a specific face and variant.
+-- Returns a JS array of PixiJS Textures for use with AnimatedSprite.
+-- Parameters:
+--   $1: spritesheet context (from generateDiceSpritesheet)
+--   $2: face (1-6)
+--   $3: variant (0-2)
+foreign import javascript unsafe
+  """
+  (() => {
+    const ctx = $1;
+    const face = $2;
+    const variant = $3;
+
+    const frames = [];
+    const baseIndex = (face - 1) * ctx.variants * ctx.framesPerAnimation
+                    + variant * ctx.framesPerAnimation;
+
+    for (let i = 0; i < ctx.framesPerAnimation; i++) {
+      const frameIndex = baseIndex + i;
+      const col = frameIndex % ctx.slotsPerRow;
+      const row = Math.floor(frameIndex / ctx.slotsPerRow);
+      const x = col * ctx.frameSize;
+      const y = row * ctx.frameSize;
+
+      const frame = new PIXI.Rectangle(x, y, ctx.frameSize, ctx.frameSize);
+      const texture = new PIXI.Texture({ source: ctx.texture.source, frame });
+      frames.push(texture);
+    }
+
+    return frames;
+  })()
+  """
+    getAnimationFrames :: JSVal  -- ^ Spritesheet context
+                       -> Int    -- ^ Face (1-6)
+                       -> Int    -- ^ Variant (0-2)
+                       -> IO JSVal  -- ^ Returns array of textures
+
+-- | Create an AnimatedSprite from a JS array of textures.
+-- This bypasses the Haskell list conversion issue.
+foreign import javascript unsafe "new PIXI.AnimatedSprite($1)"
+    newAnimatedSpriteFromJSArray :: JSVal -> IO JSVal

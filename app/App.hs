@@ -5,13 +5,11 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, disposeD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture, localStorageGet, localStorageSet)
+import Lib (blipWithFreq, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray)
 import Graphics.PixiJS
-import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
 import Control.Monad (when, forM_, void)
 import System.Random (randomRIO)
-import Numeric (showHex)
 
 -- Export the actual initialization function
 foreign export javascript "main" main :: IO ()
@@ -126,225 +124,135 @@ data GameState = GameState {
     gs_numDice :: Int  -- Number of dice to roll (increases when target is reached)
 } deriving (Show, Eq)
 
--- | Graphics settings (persisted to localStorage)
-data Settings = Settings {
-    settings_fps :: Int,        -- 30, 60, or 90
-    settings_resolution :: Int  -- 32, 64, or 128
-} deriving (Show, Eq)
 
-defaultSettings :: Settings
-defaultSettings = Settings {
-    settings_fps = 30,
-    settings_resolution = 64
-}
+-- | Vibrant color palette for dice tinting
+vibrantColors :: [Int]
+vibrantColors =
+    [ 0xFF4444  -- Bright Red
+    , 0x44FF44  -- Bright Green
+    , 0x4444FF  -- Bright Blue
+    , 0xFFFF44  -- Bright Yellow
+    , 0xFF44FF  -- Bright Magenta
+    , 0x44FFFF  -- Bright Cyan
+    , 0xFFA500  -- Orange
+    , 0x9932CC  -- Purple
+    ]
 
--- | Cycle FPS to next value
-cycleFPS :: Int -> Int
-cycleFPS 30 = 60
-cycleFPS 60 = 90
-cycleFPS _  = 30
+-- | Play a spinning dice animation using pre-generated spritesheet
+-- Uses AnimatedSprite with tinting for color variety
+playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> IO () -> IO ()
+playDiceAnimation spritesheetCtx _app container screenW screenH finalFace onComplete = do
+    -- Random bounce parameters for variety
+    bounceFreq <- randomRIO (30.0, 50.0) :: IO Float
+    bounceAmp <- randomRIO (6.0, 12.0) :: IO Float
 
--- | Cycle resolution to next value
-cycleResolution :: Int -> Int
-cycleResolution 32  = 64
-cycleResolution 64  = 128
-cycleResolution _   = 32
+    -- Random start position (around roll button)
+    startXOffset <- randomRIO (-50.0, 50.0) :: IO Float
+    startYOffset <- randomRIO (-30.0, 30.0) :: IO Float
 
--- | Helper to convert Int to 2-digit hex string
-toHex :: Int -> String
-toHex n = let h = showHex n "" in if length h == 1 then '0':h else h
+    -- Random end position (in top half of screen)
+    let topHalfHeight = fromIntegral screenH / 2
+        halfWidth = fromIntegral screenW / 2
+    endXOffset <- randomRIO (-halfWidth * 0.7, halfWidth * 0.7) :: IO Float
+    endYOffset <- randomRIO (-topHalfHeight * 0.4, topHalfHeight * 0.4) :: IO Float
 
--- | Play a spinning dice animation with randomized trajectory
--- Uses time-based animation (2 seconds total) with exact final face landing
--- Each animation gets its own slot in the spritesheet for concurrent animations
-playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> Settings -> IO () -> IO ()
-playDiceAnimation diceRenderer _app container screenW screenH finalFace settings onComplete = do
-    -- Acquire a slot for this animation
-    slotIndex <- acquireDiceSlot diceRenderer
+    -- Pick random variant (0-2) for visual variety
+    variant <- randomRIO (0, 2) :: IO Int
 
-    -- If no slot available (at capacity), just complete immediately without animation
-    if slotIndex < 0
-        then onComplete
-        else do
-            -- Random bounce parameters for variety
-            bounceFreq <- randomRIO (30.0, 50.0) :: IO Float
-            bounceAmp <- randomRIO (6.0, 12.0) :: IO Float
+    -- Pick random vibrant color
+    colorIndex <- randomRIO (0, length vibrantColors - 1) :: IO Int
+    let tintColor = vibrantColors !! colorIndex
 
-            -- Random start position (around sample button)
-            startXOffset <- randomRIO (-50.0, 50.0) :: IO Float
-            startYOffset <- randomRIO (-30.0, 30.0) :: IO Float
+    -- Fixed timing
+    let rollDuration = 1.5 :: Float    -- seconds (matches spritesheet: 30 frames at 20 FPS)
+        totalDuration = 2.0 :: Float   -- seconds (includes 0.5s hold)
 
-            -- Random end position (in top half of screen)
-            let topHalfHeight = fromIntegral screenH / 2
-                halfWidth = fromIntegral screenW / 2
-            endXOffset <- randomRIO (-halfWidth * 0.7, halfWidth * 0.7) :: IO Float
-            endYOffset <- randomRIO (-topHalfHeight * 0.4, topHalfHeight * 0.4) :: IO Float
+    let centerX = fromIntegral screenW / 2
+        topHalfY = fromIntegral screenH / 4  -- Center of top half
+        buttonY = fromIntegral screenH - 150
 
-            -- Random number of full rotations per axis (1-6)
-            numRotsX <- randomRIO (1, 6) :: IO Int
-            numRotsY <- randomRIO (1, 6) :: IO Int
-            numRotsZ <- randomRIO (1, 6) :: IO Int
+        startX = centerX + startXOffset
+        startY = buttonY + startYOffset
+        endX = centerX + endXOffset
+        endY = topHalfY + endYOffset
 
-            -- Muted colors: moderate contrast between channels
-            colorType <- randomRIO (0, 5) :: IO Int
-            (r, g, b) <- case colorType of
-                0 -> do  -- Muted Red
-                    r' <- randomRIO (180, 220) :: IO Int
-                    g' <- randomRIO (100, 140) :: IO Int
-                    b' <- randomRIO (100, 140) :: IO Int
-                    return (r', g', b')
-                1 -> do  -- Muted Green
-                    r' <- randomRIO (100, 140) :: IO Int
-                    g' <- randomRIO (180, 220) :: IO Int
-                    b' <- randomRIO (100, 140) :: IO Int
-                    return (r', g', b')
-                2 -> do  -- Muted Blue
-                    r' <- randomRIO (100, 140) :: IO Int
-                    g' <- randomRIO (100, 140) :: IO Int
-                    b' <- randomRIO (180, 220) :: IO Int
-                    return (r', g', b')
-                3 -> do  -- Muted Yellow (red + green)
-                    r' <- randomRIO (180, 220) :: IO Int
-                    g' <- randomRIO (180, 220) :: IO Int
-                    b' <- randomRIO (100, 140) :: IO Int
-                    return (r', g', b')
-                4 -> do  -- Muted Magenta (red + blue)
-                    r' <- randomRIO (180, 220) :: IO Int
-                    g' <- randomRIO (100, 140) :: IO Int
-                    b' <- randomRIO (180, 220) :: IO Int
-                    return (r', g', b')
-                _ -> do  -- Muted Cyan (green + blue)
-                    r' <- randomRIO (100, 140) :: IO Int
-                    g' <- randomRIO (180, 220) :: IO Int
-                    b' <- randomRIO (180, 220) :: IO Int
-                    return (r', g', b')
-            let diceColor = fromString $ "0x" ++ toHex r ++ toHex g ++ toHex b
+    -- Get animation frames for this face and variant
+    framesArray <- getAnimationFrames spritesheetCtx finalFace variant
 
-            -- Create D6 materials once for this roll (not per frame!)
-            d6Materials <- createD6Materials diceColor
+    -- Create AnimatedSprite from the frames array
+    animSpriteVal <- newAnimatedSpriteFromJSArray framesArray
+    let animSprite = fromJSVal animSpriteVal :: Sprite  -- Use Sprite for common operations
 
-            -- Fixed timing (2 seconds total)
-            let rollDuration = 1.5 :: Float    -- seconds
-                totalDuration = 2.0 :: Float   -- seconds (includes 0.5s hold)
+    -- Set up the sprite
+    setX animSprite startX
+    setY animSprite startY
+    setAnchor animSprite 0.5 0.5
+    setScale animSprite 2.0 2.0  -- Scale up 64px to 128px display size
+    setTint animSprite tintColor
 
-            let centerX = fromIntegral screenW / 2
-                topHalfY = fromIntegral screenH / 4  -- Center of top half
-                buttonY = fromIntegral screenH - 150
+    -- Configure animation: 30 frames over 1.5s = 20 FPS animation speed
+    -- AnimatedSprite.animationSpeed is frames per tick at 60 FPS
+    -- We want 20 FPS playback: 20/60 = 0.333
+    let animSpeed = 20.0 / 60.0 :: Float
+    setAnimationSpeed (fromJSVal animSpriteVal :: AnimatedSprite) animSpeed
+    setLoop (fromJSVal animSpriteVal :: AnimatedSprite) False
 
-                startX = centerX + startXOffset
-                startY = buttonY + startYOffset
-                endX = centerX + endXOffset
-                endY = topHalfY + endYOffset
+    void $ addChild container animSprite
 
-                -- Target rotation to land on specific face
-                -- BoxGeometry face order: +X(3), -X(4), +Y(1), -Y(6), +Z(2), -Z(5)
-                -- Camera is at (0, 0, 3) looking at origin, so +Z face is visible
-                -- We want the target face to be on +Z after rotation
-                -- Right-hand rule: +90° around X brings +Y to +Z
-                (faceRotX, faceRotY, faceRotZ) = case finalFace of
-                    1 -> (pi/2, 0, 0)        -- Face 1 on +Y, rotate +90° around X to bring to +Z
-                    6 -> (-pi/2, 0, 0)       -- Face 6 on -Y, rotate -90° around X to bring to +Z
-                    2 -> (0, 0, 0)           -- Face 2 already on +Z
-                    5 -> (pi, 0, 0)          -- Face 5 on -Z, rotate 180° around X to bring to +Z
-                    3 -> (0, -pi/2, 0)       -- Face 3 on +X, rotate -90° around Y to bring to +Z
-                    _ -> (0, pi/2, 0)        -- Face 4 on -X, rotate +90° around Y to bring to +Z
+    -- Start the spritesheet animation
+    playAnimatedSprite (fromJSVal animSpriteVal :: AnimatedSprite)
 
-                -- Total rotation = full rotations + face offset
-                -- This guarantees we land exactly on the target face
-                totalRotX = fromIntegral numRotsX * 2 * pi + faceRotX
-                totalRotY = fromIntegral numRotsY * 2 * pi + faceRotY
-                totalRotZ = fromIntegral numRotsZ * 2 * pi + faceRotZ
+    -- Create ticker for position animation and completion detection
+    animTicker <- newTicker
+    setMaxFPS animTicker 60  -- Fixed 60 FPS for smooth animation
 
-            -- Get a texture for this slot and create sprite
-            slotTextureVal <- getDiceSlotTexture diceRenderer slotIndex
-            let slotTexture = fromJSVal slotTextureVal :: Texture
-            diceSprite <- newSpriteFromTexture slotTexture
-            setX diceSprite startX
-            setY diceSprite startY
-            setAnchor diceSprite 0.5 0.5
-            -- Scale sprite up to display at 128x128 regardless of render resolution
-            let scaleFactor = 128.0 / fromIntegral (settings_resolution settings)
-            setScale diceSprite scaleFactor scaleFactor
-            void $ addChild container diceSprite
+    -- Track elapsed time
+    elapsedRef <- newIORef (0.0 :: Float)
 
-            -- Do initial render to the slot
-            renderDiceFrame diceRenderer slotIndex 0 0 0 diceColor 6 d6Materials
+    -- Add callback for position/bounce animation
+    tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
+        let ticker = fromJSVal tickerVal :: Ticker
 
-            -- Create dedicated ticker for this animation
-            animTicker <- newTicker
-            setMaxFPS animTicker (fromIntegral $ settings_fps settings)
+        -- Get delta time from ticker (in ms, convert to seconds)
+        deltaMs <- getDeltaMS ticker
+        let deltaS = deltaMs / 1000.0
 
-            -- Track elapsed time and frame count for skip optimization
-            elapsedRef <- newIORef (0.0 :: Float)
-            frameRef <- newIORef (0 :: Int)
+        elapsed <- readIORef elapsedRef
+        let newElapsed = elapsed + deltaS
+        writeIORef elapsedRef newElapsed
 
-            -- Add callback using time-based animation
-            tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
-                let ticker = fromJSVal tickerVal :: Ticker
+        -- t is progress through roll phase (0 to 1), clamped at 1
+        let t = min 1.0 (newElapsed / rollDuration) :: Float
 
-                -- Get delta time from ticker (in ms, convert to seconds)
-                deltaMs <- getDeltaMS ticker
-                let deltaS = deltaMs / 1000.0
+            -- Position: ease-out quadratic for movement
+            posEased = 1.0 - (1.0 - t) ** 2
+            currentX = startX + (endX - startX) * posEased
+            currentY = startY + (endY - startY) * posEased
 
-                elapsed <- readIORef elapsedRef
-                let newElapsed = elapsed + deltaS
-                writeIORef elapsedRef newElapsed
+            -- Bounce near end of roll (not during hold)
+            bounce = if t > 0.85 && t < 1.0
+                     then sin ((t - 0.85) * bounceFreq) * bounceAmp * (1.0 - t) * 6.67
+                     else 0
 
-                -- t is progress through roll phase (0 to 1), clamped at 1
-                let t = min 1.0 (newElapsed / rollDuration) :: Float
+        -- Update position
+        setX animSprite currentX
+        setY animSprite (currentY + bounce)
 
-                    -- Simple linear interpolation: at t=1.0, we're exactly at totalRot
-                    -- Use ease-out for visual appeal (fast start, slow end)
-                    tEased = if t >= 1.0 then 1.0 else 1.0 - (1.0 - t) ** 3
+        -- End after total duration (2 seconds)
+        when (newElapsed >= totalDuration) $ do
+            stop ticker
+            stopAnimatedSprite (fromJSVal animSpriteVal :: AnimatedSprite)
+            void $ removeChild container animSprite
+            onComplete
 
-                    -- Current rotation = progress * total rotation
-                    rotX = tEased * totalRotX
-                    rotY = tEased * totalRotY
-                    rotZ = tEased * totalRotZ
-
-                    -- Position: ease-out quadratic for movement
-                    posEased = 1.0 - (1.0 - t) ** 2
-                    currentX = startX + (endX - startX) * posEased
-                    currentY = startY + (endY - startY) * posEased
-
-                    -- Bounce near end of roll (not during hold)
-                    bounce = if t > 0.85 && t < 1.0
-                             then sin ((t - 0.85) * bounceFreq) * bounceAmp * (1.0 - t) * 6.67
-                             else 0
-
-                -- Update frame counter
-                frame <- readIORef frameRef
-                writeIORef frameRef (frame + 1)
-
-                -- Skip 3D render during fast rotation (t < 0.5), render every other frame
-                -- Always render when slowing down (t >= 0.5) for smooth finish
-                let shouldRender = t >= 0.5 || even frame
-
-                -- Update dice in this slot (skip expensive render during fast spin)
-                when shouldRender $
-                    renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6 d6Materials
-
-                -- Always update position for smooth movement
-                setX diceSprite currentX
-                setY diceSprite (currentY + bounce)
-
-                -- End after total duration (2 seconds)
-                when (newElapsed >= totalDuration) $ do
-                    stop ticker
-                    void $ removeChild container diceSprite
-                    releaseDiceSlot diceRenderer slotIndex
-                    disposeD6Materials d6Materials  -- Free GPU memory
-                    onComplete
-
-            add animTicker tickerCallback
-            start animTicker
+    add animTicker tickerCallback
+    start animTicker
 
 -- | Roll the current number of dice (gs_numDice) simultaneously
 rollAllDice :: JSVal -> Application -> Container -> Int -> Int
-            -> IORef GameState -> IORef Settings -> Text -> Text -> IO ()
-rollAllDice diceRenderer app container screenW screenH game_state_ref settings_ref score_text target_text = do
+            -> IORef GameState -> Text -> Text -> IO ()
+rollAllDice spritesheetCtx app container screenW screenH game_state_ref score_text target_text = do
     GameState{..} <- readIORef game_state_ref
-    settings <- readIORef settings_ref
     -- Track how many dice have completed
     completedRef <- newIORef (0 :: Int)
     -- Roll all dice simultaneously
@@ -356,7 +264,7 @@ rollAllDice diceRenderer app container screenW screenH game_state_ref settings_r
                 -- Track completion
                 completed <- readIORef completedRef
                 writeIORef completedRef (completed + 1)
-        playDiceAnimation diceRenderer app container screenW screenH finalFace settings onComplete
+        playDiceAnimation spritesheetCtx app container screenW screenH finalFace onComplete
 
 -- | Update score after a dice roll. Increments numDice when target is reached.
 updateScore :: IORef GameState -> Text -> Text -> Int -> IO ()
@@ -380,10 +288,9 @@ updateScore game_state_ref score_text target_text diceResult = do
 
 -- | Render the game screen (the main gameplay)
 renderGameScreen :: JSVal -> Application -> Container -> Int -> Int -> IORef GameState
-                 -> IORef Settings
                  -> (IO ())  -- ^ Action to show pause menu
                  -> IO ()
-renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref showPauseMenu = do
+renderGameScreen spritesheetCtx app screenContainer screen_width screen_height game_state_ref showPauseMenu = do
     clearScreen screenContainer
 
     GameState{..} <- readIORef game_state_ref
@@ -409,7 +316,7 @@ renderGameScreen diceRenderer app screenContainer screen_width screen_height gam
         button_width = 100.0,
         button_height = 100.0,
         button_color = "black",
-        button_on_click = \_ -> rollAllDice diceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref score_text target_text
+        button_on_click = \_ -> rollAllDice spritesheetCtx app screenContainer screen_width screen_height game_state_ref score_text target_text
     }
     renderButton screenContainer sample_button
 
@@ -426,14 +333,11 @@ renderGameScreen diceRenderer app screenContainer screen_width screen_height gam
 
 -- | Render the pause menu screen
 renderPauseMenu :: Application -> Container -> Int -> Int
-                -> IORef Settings
-                -> IORef JSVal  -- ^ Dice renderer ref
                 -> (IO ())  -- ^ Action to continue game
                 -> (IO ())  -- ^ Action to quit to start screen
                 -> IO ()
-renderPauseMenu _app screenContainer screen_width screen_height settings_ref diceRendererRef continueGame quitGame = do
+renderPauseMenu _app screenContainer screen_width screen_height continueGame quitGame = do
     clearScreen screenContainer
-    settings <- readIORef settings_ref
 
     -- Title
     title <- newTextWithStyle (toJSString "Paused") "black"
@@ -442,56 +346,6 @@ renderPauseMenu _app screenContainer screen_width screen_height settings_ref dic
     setAnchor title 0.5 0.5
     void $ addChild screenContainer title
 
-    -- FPS setting
-    fpsLabel <- newTextWithStyle (toJSString "Framerate:") "black"
-    setX fpsLabel (fromIntegral screen_width / 2.0 - 80.0)
-    setY fpsLabel 220.0
-    setAnchor fpsLabel 0.5 0.5
-    void $ addChild screenContainer fpsLabel
-
-    fpsValueRef <- newIORef (settings_fps settings)
-    fpsValue <- newTextWithStyle (toJSString $ show (settings_fps settings) ++ " FPS") "blue"
-    setX fpsValue (fromIntegral screen_width / 2.0 + 60.0)
-    setY fpsValue 220.0
-    setAnchor fpsValue 0.5 0.5
-    setInteractive fpsValue True
-    setCursor fpsValue "pointer"
-    on "pointerdown" fpsValue =<< jsFuncFromHs_ (\_ -> do
-        currentFps <- readIORef fpsValueRef
-        let newFps = cycleFPS currentFps
-        writeIORef fpsValueRef newFps
-        setText fpsValue (toJSString $ show newFps ++ " FPS")
-        currentSettings <- readIORef settings_ref
-        writeIORef settings_ref (currentSettings { settings_fps = newFps })
-        localStorageSet "settings_fps" (toJSString $ show newFps))
-    void $ addChild screenContainer fpsValue
-
-    -- Resolution setting
-    resLabel <- newTextWithStyle (toJSString "Resolution:") "black"
-    setX resLabel (fromIntegral screen_width / 2.0 - 80.0)
-    setY resLabel 270.0
-    setAnchor resLabel 0.5 0.5
-    void $ addChild screenContainer resLabel
-
-    resValueRef <- newIORef (settings_resolution settings)
-    resValue <- newTextWithStyle (toJSString $ show (settings_resolution settings) ++ "x" ++ show (settings_resolution settings)) "blue"
-    setX resValue (fromIntegral screen_width / 2.0 + 60.0)
-    setY resValue 270.0
-    setAnchor resValue 0.5 0.5
-    setInteractive resValue True
-    setCursor resValue "pointer"
-    on "pointerdown" resValue =<< jsFuncFromHs_ (\_ -> do
-        currentRes <- readIORef resValueRef
-        let newRes = cycleResolution currentRes
-        writeIORef resValueRef newRes
-        setText resValue (toJSString $ show newRes ++ "x" ++ show newRes)
-        currentSettings <- readIORef settings_ref
-        writeIORef settings_ref (currentSettings { settings_resolution = newRes })
-        localStorageSet "settings_resolution" (toJSString $ show newRes)
-        newDiceRenderer <- initDiceRenderer newRes
-        writeIORef diceRendererRef newDiceRenderer)
-    void $ addChild screenContainer resValue
-
     -- Menu
     let pauseMenu = Menu {
         menu_items = [
@@ -499,7 +353,7 @@ renderPauseMenu _app screenContainer screen_width screen_height settings_ref dic
             MenuItem { menuItem_text = "Quit", menuItem_action = quitGame }
         ],
         menu_x = fromIntegral screen_width / 2.0,
-        menu_y = fromIntegral screen_height / 2.0 + 80.0,
+        menu_y = fromIntegral screen_height / 2.0,
         menu_spacing = 60.0,
         menu_color = "black",
         menu_hoverColor = "blue"
@@ -544,13 +398,10 @@ renderStartScreen _app screenContainer screen_width screen_height showGame showO
 
 -- | Render the options screen
 renderOptionsScreen :: Application -> Container -> Int -> Int
-                    -> IORef Settings
-                    -> IORef JSVal  -- ^ Dice renderer ref (to reinitialize on resolution change)
                     -> (IO ())  -- ^ Action to go back to start screen
                     -> IO ()
-renderOptionsScreen _app screenContainer screen_width screen_height settings_ref diceRendererRef goBack = do
+renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
     clearScreen screenContainer
-    settings <- readIORef settings_ref
 
     -- Title
     title <- newTextWithStyle (toJSString "Options") "black"
@@ -559,64 +410,12 @@ renderOptionsScreen _app screenContainer screen_width screen_height settings_ref
     setAnchor title 0.5 0.5
     void $ addChild screenContainer title
 
-    -- FPS label
-    fpsLabel <- newTextWithStyle (toJSString "Framerate:") "black"
-    setX fpsLabel (fromIntegral screen_width / 2.0 - 80.0)
-    setY fpsLabel (fromIntegral screen_height / 2.0 - 80.0)
-    setAnchor fpsLabel 0.5 0.5
-    void $ addChild screenContainer fpsLabel
-
-    -- FPS value (clickable)
-    fpsValueRef <- newIORef (settings_fps settings)
-    fpsValue <- newTextWithStyle (toJSString $ show (settings_fps settings) ++ " FPS") "blue"
-    setX fpsValue (fromIntegral screen_width / 2.0 + 60.0)
-    setY fpsValue (fromIntegral screen_height / 2.0 - 80.0)
-    setAnchor fpsValue 0.5 0.5
-    setInteractive fpsValue True
-    setCursor fpsValue "pointer"
-    on "pointerdown" fpsValue =<< jsFuncFromHs_ (\_ -> do
-        currentFps <- readIORef fpsValueRef
-        let newFps = cycleFPS currentFps
-        writeIORef fpsValueRef newFps
-        setText fpsValue (toJSString $ show newFps ++ " FPS")
-        -- Update settings
-        currentSettings <- readIORef settings_ref
-        let newSettings = currentSettings { settings_fps = newFps }
-        writeIORef settings_ref newSettings
-        -- Save to localStorage
-        localStorageSet "settings_fps" (toJSString $ show newFps))
-    void $ addChild screenContainer fpsValue
-
-    -- Resolution label
-    resLabel <- newTextWithStyle (toJSString "Resolution:") "black"
-    setX resLabel (fromIntegral screen_width / 2.0 - 80.0)
-    setY resLabel (fromIntegral screen_height / 2.0 - 20.0)
-    setAnchor resLabel 0.5 0.5
-    void $ addChild screenContainer resLabel
-
-    -- Resolution value (clickable)
-    resValueRef <- newIORef (settings_resolution settings)
-    resValue <- newTextWithStyle (toJSString $ show (settings_resolution settings) ++ "x" ++ show (settings_resolution settings)) "blue"
-    setX resValue (fromIntegral screen_width / 2.0 + 60.0)
-    setY resValue (fromIntegral screen_height / 2.0 - 20.0)
-    setAnchor resValue 0.5 0.5
-    setInteractive resValue True
-    setCursor resValue "pointer"
-    on "pointerdown" resValue =<< jsFuncFromHs_ (\_ -> do
-        currentRes <- readIORef resValueRef
-        let newRes = cycleResolution currentRes
-        writeIORef resValueRef newRes
-        setText resValue (toJSString $ show newRes ++ "x" ++ show newRes)
-        -- Update settings
-        currentSettings <- readIORef settings_ref
-        let newSettings = currentSettings { settings_resolution = newRes }
-        writeIORef settings_ref newSettings
-        -- Save to localStorage
-        localStorageSet "settings_resolution" (toJSString $ show newRes)
-        -- Reinitialize dice renderer with new resolution
-        newDiceRenderer <- initDiceRenderer newRes
-        writeIORef diceRendererRef newDiceRenderer)
-    void $ addChild screenContainer resValue
+    -- Placeholder text (no settings currently)
+    noSettings <- newTextWithStyle (toJSString "(No settings available)") "gray"
+    setX noSettings (fromIntegral screen_width / 2.0)
+    setY noSettings (fromIntegral screen_height / 2.0 - 40.0)
+    setAnchor noSettings 0.5 0.5
+    void $ addChild screenContainer noSettings
 
     -- Back menu
     let backMenu = Menu {
@@ -624,7 +423,7 @@ renderOptionsScreen _app screenContainer screen_width screen_height settings_ref
             MenuItem { menuItem_text = "Back", menuItem_action = goBack }
         ],
         menu_x = fromIntegral screen_width / 2.0,
-        menu_y = fromIntegral screen_height / 2.0 + 80.0,
+        menu_y = fromIntegral screen_height / 2.0 + 40.0,
         menu_spacing = 60.0,
         menu_color = "black",
         menu_hoverColor = "blue"
@@ -642,18 +441,17 @@ initialGameState = GameState {
     gs_numDice = 1
 }
 
--- | Load settings from localStorage or use defaults
-loadSettings :: IO Settings
-loadSettings = do
-    fpsStr <- localStorageGet "settings_fps"
-    resStr <- localStorageGet "settings_resolution"
-    let fps = case reads (fromJSString fpsStr) of
-                [(n, "")] | n `elem` [30, 60, 90] -> n
-                _ -> settings_fps defaultSettings
-    let res = case reads (fromJSString resStr) of
-                [(n, "")] | n `elem` [32, 64, 128] -> n
-                _ -> settings_resolution defaultSettings
-    return Settings { settings_fps = fps, settings_resolution = res }
+-- | Render a loading screen
+renderLoadingScreen :: Container -> Int -> Int -> IO ()
+renderLoadingScreen screenContainer screen_width screen_height = do
+    clearScreen screenContainer
+
+    -- Loading text
+    loadingText <- newTextWithStyle (toJSString "Loading...") "black"
+    setX loadingText (fromIntegral screen_width / 2.0)
+    setY loadingText (fromIntegral screen_height / 2.0)
+    setAnchor loadingText 0.5 0.5
+    void $ addChild screenContainer loadingText
 
 main :: IO ()
 main = do
@@ -669,16 +467,14 @@ main = do
     stage <- getStage app
     void $ addChild stage screenContainer
 
+    -- Show loading screen immediately
+    renderLoadingScreen screenContainer screen_width screen_height
+
+    -- Generate dice spritesheet (async operation)
+    spritesheetCtx <- generateDiceSpritesheet
+
     -- Initialize game state
     game_state_ref <- newIORef initialGameState
-
-    -- Load settings from localStorage or use defaults
-    settings <- loadSettings
-    settings_ref <- newIORef settings
-
-    -- Initialize persistent dice renderer with configured resolution
-    diceRenderer <- initDiceRenderer (settings_resolution settings)
-    diceRendererRef <- newIORef diceRenderer
 
     -- Define screen transition functions using mutual recursion via IORefs
     showStartScreenRef <- newIORef (return () :: IO ())
@@ -714,16 +510,15 @@ main = do
 
     writeIORef showOptionsScreenRef $
         renderOptionsScreen app screenContainer screen_width screen_height
-            settings_ref diceRendererRef showStartScreen
+            showStartScreen
 
-    writeIORef showGameScreenRef $ do
-        currentDiceRenderer <- readIORef diceRendererRef
-        renderGameScreen currentDiceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref
+    writeIORef showGameScreenRef $
+        renderGameScreen spritesheetCtx app screenContainer screen_width screen_height game_state_ref
             showPauseMenu
 
     writeIORef showPauseMenuRef $
         renderPauseMenu app screenContainer screen_width screen_height
-            settings_ref diceRendererRef showGameScreen quitToStart
+            showGameScreen quitToStart
 
-    -- Start at the start screen
+    -- Transition from loading to start screen
     showStartScreen

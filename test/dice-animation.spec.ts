@@ -13,8 +13,8 @@ test.describe('Dice Animation', () => {
     // Navigate to the app
     await page.goto('/');
 
-    // Wait for page to load
-    await page.waitForTimeout(500);
+    // Wait for spritesheet generation and page to load (~2-4 seconds)
+    await page.waitForTimeout(5000);
 
     // Check that THREE is defined
     const threeIsDefined = await page.evaluate(() => {
@@ -62,8 +62,8 @@ test.describe('Dice Animation', () => {
     const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
-    // Wait for app to fully render
-    await page.waitForTimeout(1000);
+    // Wait for spritesheet generation and app to fully render (~2-4 seconds)
+    await page.waitForTimeout(5000);
 
     // Click "Start Game" to get to game screen
     const boundingBox = await canvas.boundingBox();
@@ -147,8 +147,8 @@ test.describe('Dice Animation', () => {
     const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
-    // Wait for app to fully render
-    await page.waitForTimeout(1000);
+    // Wait for spritesheet generation and app to fully render (~2-4 seconds)
+    await page.waitForTimeout(5000);
 
     // Click "Start Game" to get to game screen
     const boundingBox = await canvas.boundingBox();
@@ -207,8 +207,8 @@ test.describe('Dice Animation', () => {
     const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
-    // Wait for app to fully render
-    await page.waitForTimeout(1000);
+    // Wait for spritesheet generation and app to fully render (~2-4 seconds)
+    await page.waitForTimeout(5000);
 
     // Click "Start Game" to get to game screen
     const boundingBox = await canvas.boundingBox();

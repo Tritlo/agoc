@@ -9,8 +9,9 @@ test.describe('Menu System', () => {
     const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
-    // Wait for the app to fully initialize
-    await page.waitForTimeout(1000);
+    // Wait for spritesheet generation (loading screen) and app to fully initialize
+    // Spritesheet generation takes ~2-4 seconds
+    await page.waitForTimeout(5000);
   });
 
   test('start screen displays menu items', async ({ page }) => {
@@ -79,6 +80,7 @@ test.describe('Menu System', () => {
     console.log('Options screen texts:', texts);
 
     expect(texts).toContain('Options');
+    expect(texts).toContain('(No settings available)');
     expect(texts).toContain('Back');
     expect(texts).not.toContain('Start Game');
   });
@@ -95,8 +97,8 @@ test.describe('Menu System', () => {
     await page.mouse.click(centerX, menuStartY + 60);
     await page.waitForTimeout(500);
 
-    // Now click Back (at menu_y + 50 from options screen)
-    const backY = boundingBox.y + boundingBox.height / 2 + 50;
+    // Now click Back (at menu_y + 40 from options screen, since resolution setting was removed)
+    const backY = boundingBox.y + boundingBox.height / 2 + 40;
     await page.mouse.click(centerX, backY);
     await page.waitForTimeout(500);
 
@@ -247,6 +249,7 @@ test.describe('Menu System', () => {
     expect(texts).toContain('Paused');
     expect(texts).toContain('Continue');
     expect(texts).toContain('Quit');
+    expect(texts).not.toContain('Framerate:');
   });
 
   test('clicking Continue returns to game', async ({ page }) => {
@@ -266,8 +269,9 @@ test.describe('Menu System', () => {
     await page.mouse.click(centerX, menuButtonY);
     await page.waitForTimeout(500);
 
-    // Click Continue (first menu item at center)
-    await page.mouse.click(centerX, menuStartY);
+    // Click Continue (first menu item, pause menu is at screen_height/2)
+    const pauseMenuY = boundingBox.y + boundingBox.height / 2;
+    await page.mouse.click(centerX, pauseMenuY);
     await page.waitForTimeout(1000);
 
     // Check that we're back on the game screen
@@ -319,8 +323,9 @@ test.describe('Menu System', () => {
     await page.mouse.click(centerX, menuButtonY);
     await page.waitForTimeout(500);
 
-    // Click Quit (second menu item, 60px below Continue)
-    const quitY = menuStartY + 60;
+    // Click Quit (second menu item in pause menu at screen_height/2 + 60)
+    const pauseMenuY = boundingBox.y + boundingBox.height / 2;
+    const quitY = pauseMenuY + 60;
     await page.mouse.click(centerX, quitY);
     await page.waitForTimeout(500);
 
