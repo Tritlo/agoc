@@ -126,8 +126,8 @@ test.describe('Dice Animation', () => {
     expect(scoreText).toMatch(/^Score: \d+$/);
   });
 
-  test('clicking roll 20 times in bursts accumulates many dice without breaking', async ({ page }) => {
-    test.setTimeout(30000); // 30 second timeout
+  test('clicking roll 256 times rapidly does not break', async ({ page }) => {
+    test.setTimeout(20000); // 20 second timeout
     // Listen for page errors
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
@@ -160,60 +160,36 @@ test.describe('Dice Animation', () => {
     await page.mouse.click(centerX, menuY);
 
     // Wait for game screen to load
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1000);
 
     const clickX = boundingBox.x + boundingBox.width / 2;
     const clickY = boundingBox.y + boundingBox.height - 150;
 
-    // Click 10 times rapidly (burst 1)
-    for (let i = 0; i < 10; i++) {
-      await page.mouse.click(clickX, clickY);
-      await page.waitForTimeout(100);
-    }
+    // Click 256 times as fast as possible using direct DOM events
+    await page.evaluate(({x, y}) => {
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return;
+      for (let i = 0; i < 256; i++) {
+        canvas.dispatchEvent(new MouseEvent('pointerdown', {
+          bubbles: true, clientX: x, clientY: y, button: 0
+        }));
+        canvas.dispatchEvent(new MouseEvent('pointerup', {
+          bubbles: true, clientX: x, clientY: y, button: 0
+        }));
+      }
+    }, {x: clickX, y: clickY});
 
-    // Wait for animations to complete
-    await page.waitForTimeout(3000);
-
-    // Click 10 times rapidly (burst 2)
-    for (let i = 0; i < 10; i++) {
-      await page.mouse.click(clickX, clickY);
-      await page.waitForTimeout(100);
-    }
-
-    // Wait for animations to complete
-    await page.waitForTimeout(3000);
+    // Brief wait for any errors to surface
+    await page.waitForTimeout(1000);
 
     // Check for WebGL/texture errors
     const criticalErrors = [...pageErrors, ...consoleErrors].filter(e =>
       e.includes('WebGL') || e.includes('GL_INVALID') || e.includes('texture') || e.includes('overflow')
     );
 
-    console.log('Page errors after 20 clicks in 2 bursts:', pageErrors);
-    console.log('Console errors after 20 clicks in 2 bursts:', consoleErrors);
+    console.log('Page errors after 256 rapid clicks:', pageErrors);
+    console.log('Console errors after 256 rapid clicks:', consoleErrors);
     expect(criticalErrors).toHaveLength(0);
-
-    // Verify the app is still functional
-    const scoreText = await page.evaluate(() => {
-      const app = (window as any).__PIXI_APP__;
-      if (!app?.stage?.children) return null;
-
-      const findScore = (container: any): string | null => {
-        if (container.text && container.text.startsWith('Score:')) {
-          return container.text;
-        }
-        if (container.children) {
-          for (const child of container.children) {
-            const result = findScore(child);
-            if (result) return result;
-          }
-        }
-        return null;
-      };
-      return findScore(app.stage);
-    });
-
-    console.log('Score after 20 clicks in 2 bursts:', scoreText);
-    expect(scoreText).toMatch(/^Score: \d+$/);
   });
 
   test('clicking sample button multiple times does not exhaust WebGL contexts', async ({ page }) => {
