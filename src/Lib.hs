@@ -363,19 +363,19 @@ foreign import javascript safe
 
     // Helper function to create a texture with a number for D6 faces
     const createD6FaceTexture = (number, bgColor, textColor) => {
-      const faceCanvas = new OffscreenCanvas(128, 128);
+      const faceCanvas = new OffscreenCanvas(64, 64);
       const ctx = faceCanvas.getContext('2d');
 
       // Background
       ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, 128, 128);
+      ctx.fillRect(0, 0, 64, 64);
 
       // Number
       ctx.fillStyle = textColor;
-      ctx.font = 'bold 72px Arial';
+      ctx.font = 'bold 36px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(number.toString(), 64, 68);
+      ctx.fillText(number.toString(), 32, 34);
 
       return new THREE.CanvasTexture(faceCanvas);
     };
@@ -450,18 +450,18 @@ foreign import javascript safe
     const bgColor = '#' + hexColor;
     const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
     return d6FaceNumbers.map(num => {
-      const faceCanvas = new OffscreenCanvas(128, 128);
+      const faceCanvas = new OffscreenCanvas(64, 64);
       const faceCtx = faceCanvas.getContext('2d');
       faceCtx.fillStyle = bgColor;
-      faceCtx.fillRect(0, 0, 128, 128);
-      faceCtx.font = 'bold 72px Arial';
+      faceCtx.fillRect(0, 0, 64, 64);
+      faceCtx.font = 'bold 36px Arial';  // Smaller font for 64x64
       faceCtx.textAlign = 'center';
       faceCtx.textBaseline = 'middle';
       faceCtx.strokeStyle = '#000000';
-      faceCtx.lineWidth = 3;
-      faceCtx.strokeText(num.toString(), 64, 68);
+      faceCtx.lineWidth = 2;
+      faceCtx.strokeText(num.toString(), 32, 34);
       faceCtx.fillStyle = '#ffffff';
-      faceCtx.fillText(num.toString(), 64, 68);
+      faceCtx.fillText(num.toString(), 32, 34);
       return new THREE.MeshBasicMaterial({
         map: new THREE.CanvasTexture(faceCanvas)
       });

@@ -245,10 +245,11 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
 
             -- Create dedicated ticker for this animation
             animTicker <- newTicker
-            setMaxFPS animTicker 60
+            setMaxFPS animTicker 30  -- Lower FPS for mobile performance
 
-            -- Track elapsed time
+            -- Track elapsed time and frame count for skip optimization
             elapsedRef <- newIORef (0.0 :: Float)
+            frameRef <- newIORef (0 :: Int)
 
             -- Add callback using time-based animation
             tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
@@ -284,8 +285,19 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
                              then sin ((t - 0.85) * bounceFreq) * bounceAmp * (1.0 - t) * 6.67
                              else 0
 
-                -- Update dice in this slot
-                renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6 d6Materials
+                -- Update frame counter
+                frame <- readIORef frameRef
+                writeIORef frameRef (frame + 1)
+
+                -- Skip 3D render during fast rotation (t < 0.5), render every other frame
+                -- Always render when slowing down (t >= 0.5) for smooth finish
+                let shouldRender = t >= 0.5 || even frame
+
+                -- Update dice in this slot (skip expensive render during fast spin)
+                when shouldRender $
+                    renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6 d6Materials
+
+                -- Always update position for smooth movement
                 setX diceSprite currentX
                 setY diceSprite (currentY + bounce)
 
@@ -511,7 +523,7 @@ main = do
     game_state_ref <- newIORef initialGameState
 
     -- Initialize persistent dice renderer (single WebGL context for all dice animations)
-    diceRenderer <- initDiceRenderer 128
+    diceRenderer <- initDiceRenderer 64  -- Smaller for mobile performance
 
     -- Define screen transition functions using mutual recursion via IORefs
     showStartScreenRef <- newIORef (return () :: IO ())
