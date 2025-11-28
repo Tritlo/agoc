@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray)
+import Lib (blipWithFreq, playDiceRollSound, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray)
 import Graphics.PixiJS
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
 import Control.Monad (when, forM_, void)
@@ -253,6 +253,7 @@ rollAllDice :: JSVal -> Application -> Container -> Int -> Int
             -> IORef GameState -> Text -> Text -> IO ()
 rollAllDice spritesheetCtx app container screenW screenH game_state_ref score_text target_text = do
     GameState{..} <- readIORef game_state_ref
+    playDiceRollSound gs_numDice
     -- Track how many dice have completed
     completedRef <- newIORef (0 :: Int)
     -- Roll all dice simultaneously

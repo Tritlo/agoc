@@ -127,6 +127,49 @@
       oscillator.stop(t0 + attack + release + 0.02);
     }
 
+    // Dice roll sound - 8-bit style bouncing dice
+    // numDice: number of dice being rolled (more dice = more overlapping sounds)
+    window.rollDice = (numDice = 1) => {
+      const now = audio_context.currentTime;
+      const rollDuration = 1.5; // Match dice animation duration
+
+      // Scale volume to prevent clipping with many dice
+      const volumeScale = 1 / Math.sqrt(Math.max(1, numDice));
+
+      // Each die gets its own bounce sequence
+      for (let d = 0; d < numDice; d++) {
+        const dieOffset = d * 0.05 + Math.random() * 0.08; // Stagger dice starts
+        const hits = 6 + Math.floor(Math.random() * 4); // 6-9 bounces per die
+        let t = now + dieOffset;
+
+        for (let i = 0; i < hits; i++) {
+          const osc = audio_context.createOscillator();
+          const gain = audio_context.createGain();
+
+          osc.type = "square";
+          // Higher pitch at start, lower as die settles
+          osc.frequency.value = 150 + Math.random() * 200 + (hits - i) * 20;
+
+          const startTime = t + Math.random() * 0.03;
+          // Louder at start, quieter as die settles
+          const peak = (0.08 + (hits - i) / hits * 0.12) * volumeScale;
+
+          gain.gain.setValueAtTime(0.001, startTime);
+          gain.gain.exponentialRampToValueAtTime(peak, startTime + 0.005);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.04);
+
+          osc.connect(gain).connect(master);
+          osc.start(startTime);
+          osc.stop(startTime + 0.05);
+
+          // Bounces get closer together as die settles (like real physics)
+          const progress = i / hits;
+          const interval = rollDuration / hits * (1.5 - progress * 0.8);
+          t += interval * (0.8 + Math.random() * 0.4);
+        }
+      }
+    };
+
     // Check for WebAssembly support
     if ("WebAssembly" in window) {
       const wasi = new WASI({

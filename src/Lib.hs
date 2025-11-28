@@ -7,6 +7,7 @@
 module Lib
     ( -- * Sound Effects
       blipWithFreq
+    , playDiceRollSound
       -- * Histogram Plotting
     , histogram_plot
     , HistogramOptions(..)
@@ -48,6 +49,12 @@ import Graphics.PixiJS.Interop () -- For IsString JSString instance
 -- @param frequency Frequency in Hz
 foreign import javascript unsafe "blip($1)"
     blipWithFreq :: Float -> IO ()
+
+-- | Plays a dice roll sound effect (simulates dice bouncing).
+-- The sound scales with the number of dice - more dice creates
+-- a denser, more chaotic sound with overlapping bounce sequences.
+foreign import javascript unsafe "rollDice($1)"
+    playDiceRollSound :: Int -> IO ()
 
 -- *****************************************************************************
 -- * Histogram Plotting
