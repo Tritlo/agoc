@@ -741,14 +741,14 @@ foreign import javascript unsafe "localStorage.setItem($1, $2)"
 foreign import javascript safe
   """
   (async () => {
-    const frameSize = 64;
+    const frameSize = 128;  // Higher resolution for crisp display
     const framesPerAnimation = 30;
     const variants = 3;
     const faces = 6;
     const totalFrames = framesPerAnimation * variants * faces;  // 540
 
     const slotsPerRow = 32;
-    const canvasSize = 2048;
+    const canvasSize = 4096;  // 128 * 32 = 4096
 
     // Create the spritesheet canvas
     const spritesheetCanvas = new OffscreenCanvas(canvasSize, canvasSize);
@@ -781,15 +781,15 @@ foreign import javascript safe
 
     // Create D6 face textures (white background, black numbers for tinting)
     const createD6FaceTexture = (number) => {
-      const faceCanvas = new OffscreenCanvas(64, 64);
+      const faceCanvas = new OffscreenCanvas(128, 128);
       const faceCtx = faceCanvas.getContext('2d');
       faceCtx.fillStyle = '#ffffff';
-      faceCtx.fillRect(0, 0, 64, 64);
+      faceCtx.fillRect(0, 0, 128, 128);
       faceCtx.fillStyle = '#000000';
-      faceCtx.font = 'bold 36px Arial';
+      faceCtx.font = 'bold 72px Arial';
       faceCtx.textAlign = 'center';
       faceCtx.textBaseline = 'middle';
-      faceCtx.fillText(number.toString(), 32, 34);
+      faceCtx.fillText(number.toString(), 64, 68);
       return new THREE.CanvasTexture(faceCanvas);
     };
 

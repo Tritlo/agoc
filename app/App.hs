@@ -7,9 +7,11 @@
 module Main where
 import Lib (blipWithFreq, playDiceRollSound, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray)
 import Graphics.PixiJS
-import Data.IORef (newIORef, readIORef, writeIORef, IORef)
+import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef, IORef)
 import Control.Monad (when, forM_, void)
 import System.Random (randomRIO)
+import Data.List (groupBy, sortBy)
+import Data.Ord (comparing)
 
 -- Export the actual initialization function
 foreign export javascript "main" main :: IO ()
@@ -118,11 +120,80 @@ renderButton container button = do
     void $ addChild container button_text
     return ()
 
+-- | Type of die: additive contributes to X, multiplicative to Y in X*Y scoring
+data DiceType = Additive | Multiplicative
+    deriving (Show, Eq, Ord)
+
+-- | Result of a single die roll, tracking type and value
+data DieResult = DieResult {
+    dr_type   :: DiceType,
+    dr_value  :: Int,
+    dr_sprite :: JSVal
+}
+
+-- | Current roll state for tracking dice during animation
+data RollState = RollState {
+    rs_pending     :: Int,          -- Number of dice still animating
+    rs_newResults  :: [DieResult],  -- Results from current batch (for combo detection)
+    rs_prevResults :: [DieResult],  -- Results from previous batches (not checked for combos)
+    rs_isComboRoll :: Bool          -- Whether this is a combo bonus roll
+}
+
+-- | Main game state
 data GameState = GameState {
-    gs_score :: Int,
-    gs_target :: Int,
-    gs_numDice :: Int  -- Number of dice to roll (increases when target is reached)
-} deriving (Show, Eq)
+    gs_score              :: Int,       -- Current accumulated score
+    gs_target             :: Int,       -- Target to reach
+    gs_additiveDice       :: Int,       -- Number of additive dice
+    gs_multiplicativeDice :: Int,       -- Number of multiplicative dice
+    gs_persistentSprites  :: [JSVal],   -- Sprites from last roll (to clear on next roll)
+    gs_rollState          :: Maybe RollState,  -- Active roll tracking (Nothing when idle)
+    gs_round              :: Int        -- Current round number
+}
+
+-- | Initial game state
+initialGameState :: GameState
+initialGameState = GameState {
+    gs_score = 0,
+    gs_target = 15,
+    gs_additiveDice = 1,
+    gs_multiplicativeDice = 0,
+    gs_persistentSprites = [],
+    gs_rollState = Nothing,
+    gs_round = 1
+}
+
+-- | Calculate final score from dice results
+-- X = sum of additive dice values
+-- Y = sum of multiplicative dice values (defaults to 1 if none)
+-- Score = X * Y
+calculateScore :: [DieResult] -> Int
+calculateScore results =
+    let x = sum [dr_value r | r <- results, dr_type r == Additive]
+        y = sum [dr_value r | r <- results, dr_type r == Multiplicative]
+        yFinal = if y == 0 then 1 else y
+    in x * yFinal
+
+-- | Calculate new target after reaching current target
+calculateNewTarget :: Int -> Int -> Int -> Int
+calculateNewTarget currentTarget numAdditive numMultiplicative =
+    let expectedX = 3.5 * fromIntegral numAdditive
+        expectedY = if numMultiplicative == 0 then 1.0 else 3.5 * fromIntegral numMultiplicative
+        expectedScore = expectedX * expectedY
+    in round (expectedScore * 1.3) + (currentTarget `div` 10)
+
+-- | Detect combos: groups of same-type dice showing same number
+detectCombos :: [DieResult] -> [(DiceType, Int, [DieResult])]
+detectCombos results =
+    let sorted = sortBy (comparing (\r -> (dr_type r, dr_value r))) results
+        grouped = groupBy sameTypeAndValue sorted
+        combos = filter (\g -> length g >= 2) grouped
+    in [(dr_type (head g), dr_value (head g), g) | g <- combos]
+  where
+    sameTypeAndValue a b = dr_type a == dr_type b && dr_value a == dr_value b
+
+-- | Count bonus dice from combos (each combo gives exactly 1 bonus die)
+countBonusDice :: [(DiceType, Int, [DieResult])] -> [(DiceType, Int)]
+countBonusDice combos = [(dt, 1) | (dt, _, _) <- combos]
 
 
 -- | Vibrant color palette for dice tinting
@@ -140,8 +211,9 @@ vibrantColors =
 
 -- | Play a spinning dice animation using pre-generated spritesheet
 -- Uses AnimatedSprite with tinting for color variety
-playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> IO () -> IO ()
-playDiceAnimation spritesheetCtx _app container screenW screenH finalFace onComplete = do
+-- Returns the sprite JSVal for persistence tracking
+playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> DiceType -> IO () -> IO JSVal
+playDiceAnimation spritesheetCtx _app container screenW screenH finalFace diceType onComplete = do
     -- Random bounce parameters for variety
     bounceFreq <- randomRIO (30.0, 50.0) :: IO Float
     bounceAmp <- randomRIO (6.0, 12.0) :: IO Float
@@ -187,8 +259,15 @@ playDiceAnimation spritesheetCtx _app container screenW screenH finalFace onComp
     setX animSprite startX
     setY animSprite startY
     setAnchor animSprite 0.5 0.5
-    setScale animSprite 2.0 2.0  -- Scale up 64px to 128px display size
+    setScale animSprite 1.0 1.0  -- 128px native resolution
     setTint animSprite tintColor
+
+    -- Apply negative filter for multiplicative dice
+    when (diceType == Multiplicative) $ do
+        negFilter <- newColorMatrixFilter
+        colorMatrixNegative negFilter False
+        let ColorMatrixFilter f = negFilter
+        addFilter animSpriteVal f
 
     -- Configure animation: 30 frames over 1.5s = 20 FPS animation speed
     -- AnimatedSprite.animationSpeed is frames per tick at 60 FPS
@@ -242,46 +321,385 @@ playDiceAnimation spritesheetCtx _app container screenW screenH finalFace onComp
         when (newElapsed >= totalDuration) $ do
             stop ticker
             stopAnimatedSprite (fromJSVal animSpriteVal :: AnimatedSprite)
-            void $ removeChild container animSprite
+            -- Don't remove sprite - keep it on screen until next roll
             onComplete
 
     add animTicker tickerCallback
     start animTicker
+    return animSpriteVal
 
--- | Roll the current number of dice (gs_numDice) simultaneously
+-- | Roll all dice (additive and multiplicative) simultaneously
 rollAllDice :: JSVal -> Application -> Container -> Int -> Int
-            -> IORef GameState -> Text -> Text -> IO ()
-rollAllDice spritesheetCtx app container screenW screenH game_state_ref score_text target_text = do
-    GameState{..} <- readIORef game_state_ref
-    playDiceRollSound gs_numDice
-    -- Track how many dice have completed
-    completedRef <- newIORef (0 :: Int)
-    -- Roll all dice simultaneously
-    forM_ [1..gs_numDice] $ \_ -> do
-        finalFace <- randomRIO (1, 6) :: IO Int
-        let onComplete = do
-                -- Add this die's result to score
-                updateScore game_state_ref score_text target_text finalFace
-                -- Track completion
-                completed <- readIORef completedRef
-                writeIORef completedRef (completed + 1)
-        playDiceAnimation spritesheetCtx app container screenW screenH finalFace onComplete
+            -> IORef GameState -> Text -> Text -> Text -> Text -> IO ()
+rollAllDice spritesheetCtx app container screenW screenH
+            gameStateRef scoreText targetText diceCountText xyText = do
+    gs <- readIORef gameStateRef
 
--- | Update score after a dice roll. Increments numDice when target is reached.
-updateScore :: IORef GameState -> Text -> Text -> Int -> IO ()
-updateScore game_state_ref score_text target_text diceResult = do
-    game_state@GameState{..} <- readIORef game_state_ref
+    -- Prevent rolling while roll in progress
+    case gs_rollState gs of
+        Just _ -> return ()  -- Roll already in progress
+        Nothing -> do
+            -- Clear previous roll's sprites
+            forM_ (gs_persistentSprites gs) $ \spriteVal -> do
+                let sprite = fromJSVal spriteVal :: Sprite
+                void $ removeChild container sprite
 
-    let new_score = gs_score + diceResult
-    setText score_text (toJSString $ "Score: " ++ show new_score)
-    if new_score >= gs_target then do
-        blipWithFreq 800.0
-        let new_target = gs_target + 10 + gs_numDice * 5  -- Increase target moderately
-        let new_numDice = gs_numDice + 1
-        setText target_text (toJSString $ "Target: " ++ show new_target)
-        writeIORef game_state_ref (game_state { gs_score = 0, gs_target = new_target, gs_numDice = new_numDice })
-    else
-        writeIORef game_state_ref (game_state { gs_score = new_score })
+            let totalDice = gs_additiveDice gs + gs_multiplicativeDice gs
+            playDiceRollSound totalDice
+
+            -- Initialize roll state
+            writeIORef gameStateRef $ gs {
+                gs_rollState = Just $ RollState {
+                    rs_pending = totalDice,
+                    rs_newResults = [],
+                    rs_prevResults = [],
+                    rs_isComboRoll = False
+                },
+                gs_persistentSprites = []
+            }
+
+            -- Create list of dice types to roll
+            let diceToRoll = replicate (gs_additiveDice gs) Additive
+                          ++ replicate (gs_multiplicativeDice gs) Multiplicative
+
+            -- Roll each die
+            forM_ diceToRoll $ \diceType -> do
+                finalFace <- randomRIO (1, 6) :: IO Int
+                spriteRef <- newIORef (error "sprite not initialized")
+                let onComplete = do
+                        spriteVal <- readIORef spriteRef
+                        onDieComplete gameStateRef scoreText targetText diceCountText xyText
+                                     container screenW screenH spritesheetCtx app
+                                     diceType finalFace spriteVal
+                spriteVal <- playDiceAnimation spritesheetCtx app container
+                                               screenW screenH finalFace diceType
+                                               onComplete
+                writeIORef spriteRef spriteVal
+                modifyIORef gameStateRef $ \s ->
+                    s { gs_persistentSprites = spriteVal : gs_persistentSprites s }
+
+-- | Called when a single die animation completes
+onDieComplete :: IORef GameState
+              -> Text -> Text -> Text -> Text
+              -> Container -> Int -> Int
+              -> JSVal -> Application
+              -> DiceType -> Int -> JSVal
+              -> IO ()
+onDieComplete gameStateRef scoreText targetText diceCountText xyText
+              container screenW screenH spritesheetCtx app
+              diceType value spriteVal = do
+    gs <- readIORef gameStateRef
+    case gs_rollState gs of
+        Nothing -> return ()  -- Shouldn't happen
+        Just rs -> do
+            let newResult = DieResult diceType value spriteVal
+                updatedNewResults = newResult : rs_newResults rs
+                newPending = rs_pending rs - 1
+
+            if newPending == 0
+                then onAllDiceComplete gameStateRef scoreText targetText diceCountText xyText
+                                      container screenW screenH spritesheetCtx app
+                                      updatedNewResults (rs_prevResults rs)
+                else writeIORef gameStateRef $ gs {
+                    gs_rollState = Just $ rs {
+                        rs_pending = newPending,
+                        rs_newResults = updatedNewResults
+                    }
+                }
+
+-- | Called when all dice in current roll have completed
+onAllDiceComplete :: IORef GameState -> Text -> Text -> Text -> Text
+                  -> Container -> Int -> Int -> JSVal -> Application
+                  -> [DieResult] -> [DieResult]  -- newResults, prevResults
+                  -> IO ()
+onAllDiceComplete gameStateRef scoreText targetText diceCountText xyText
+                  container screenW screenH spritesheetCtx app
+                  newResults prevResults = do
+    -- Calculate and display current X * Y
+    let allResults = newResults ++ prevResults
+        x = sum [dr_value r | r <- allResults, dr_type r == Additive]
+        y = sum [dr_value r | r <- allResults, dr_type r == Multiplicative]
+        yDisplay = if y == 0 then 1 else y
+        rollScore = x * yDisplay
+    setText xyText (toJSString $ show x ++ " * " ++ show yDisplay ++ " = " ++ show rollScore)
+
+    -- Detect combos ONLY in newly rolled dice
+    let combos = detectCombos newResults
+        bonusDice = countBonusDice combos
+        totalBonus = sum [count | (_, count) <- bonusDice]
+
+    if totalBonus > 0
+        then do
+            -- Trigger combo effects
+            triggerComboEffects container screenW screenH combos
+            -- Roll bonus dice - newResults become prevResults for next batch
+            rollBonusDice spritesheetCtx app container screenW screenH
+                         gameStateRef scoreText targetText diceCountText xyText
+                         bonusDice (newResults ++ prevResults)
+        else do
+            -- No combos, finalize with all results
+            finalizeRoll gameStateRef scoreText targetText diceCountText xyText
+                        container screenW screenH (newResults ++ prevResults)
+
+-- | Roll bonus dice from combos
+rollBonusDice :: JSVal -> Application -> Container -> Int -> Int
+              -> IORef GameState -> Text -> Text -> Text -> Text
+              -> [(DiceType, Int)] -> [DieResult]
+              -> IO ()
+rollBonusDice spritesheetCtx app container screenW screenH
+              gameStateRef scoreText targetText diceCountText xyText
+              bonusDice allPreviousResults = do
+    let totalBonus = sum [count | (_, count) <- bonusDice]
+    playDiceRollSound totalBonus
+
+    -- Set up roll state for bonus dice
+    -- Previous results go to prevResults, newResults starts empty
+    gs <- readIORef gameStateRef
+    writeIORef gameStateRef $ gs {
+        gs_rollState = Just $ RollState {
+            rs_pending = totalBonus,
+            rs_newResults = [],  -- Bonus dice will be added here
+            rs_prevResults = allPreviousResults,  -- All previous results
+            rs_isComboRoll = True
+        }
+    }
+
+    -- Roll each bonus die
+    forM_ bonusDice $ \(diceType, count) ->
+        forM_ [1..count] $ \_ -> do
+            finalFace <- randomRIO (1, 6) :: IO Int
+            spriteRef <- newIORef (error "sprite not initialized")
+            let onComplete = do
+                    spriteVal <- readIORef spriteRef
+                    onDieComplete gameStateRef scoreText targetText diceCountText xyText
+                                 container screenW screenH spritesheetCtx app
+                                 diceType finalFace spriteVal
+            spriteVal <- playDiceAnimation spritesheetCtx app container
+                                           screenW screenH finalFace diceType
+                                           onComplete
+            writeIORef spriteRef spriteVal
+            modifyIORef gameStateRef $ \s ->
+                s { gs_persistentSprites = spriteVal : gs_persistentSprites s }
+
+-- | Trigger visual effects for combos (screen flash + dice highlight)
+triggerComboEffects :: Container -> Int -> Int
+                    -> [(DiceType, Int, [DieResult])]
+                    -> IO ()
+triggerComboEffects container screenW screenH combos = do
+    -- Screen flash
+    flashGraphics <- newGraphics
+    beginFillWithAlpha flashGraphics 0xFFFFFF 0.8
+    drawRect flashGraphics 0 0 (fromIntegral screenW) (fromIntegral screenH)
+    endFill flashGraphics
+    void $ addChild container flashGraphics
+
+    -- Fade out animation using ticker
+    flashTicker <- newTicker
+    setMaxFPS flashTicker 60
+    alphaRef <- newIORef (0.8 :: Float)
+
+    tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
+        let ticker = fromJSVal tickerVal :: Ticker
+        alpha <- readIORef alphaRef
+        let newAlpha = alpha - 0.05  -- Fade over ~16 frames (~270ms)
+        if newAlpha <= 0
+            then do
+                stop ticker
+                void $ removeChild container flashGraphics
+            else do
+                setAlpha flashGraphics newAlpha
+                writeIORef alphaRef newAlpha
+
+    add flashTicker tickerCallback
+    start flashTicker
+
+    -- Highlight matching dice
+    forM_ combos $ \(_, _, matchingDice) ->
+        forM_ matchingDice $ \die ->
+            highlightDie (dr_sprite die)
+
+-- | Highlight a die sprite (pulsing scale effect)
+highlightDie :: JSVal -> IO ()
+highlightDie spriteVal = do
+    let sprite = fromJSVal spriteVal :: Sprite
+    -- Temporarily increase scale for "pop" effect
+    setScale sprite 1.2 1.2  -- Slightly larger than normal 1.0
+
+    -- Animate back to normal
+    highlightTicker <- newTicker
+    setMaxFPS highlightTicker 60
+    scaleRef <- newIORef (1.2 :: Float)
+
+    tickerCallback <- jsFuncFromHs_ $ \tickerVal -> do
+        let ticker = fromJSVal tickerVal :: Ticker
+        currentScale <- readIORef scaleRef
+        let newScale = currentScale - 0.01  -- 20 frames to return to normal
+        if newScale <= 1.0
+            then do
+                stop ticker
+                setScale sprite 1.0 1.0
+            else do
+                setScale sprite newScale newScale
+                writeIORef scaleRef newScale
+
+    add highlightTicker tickerCallback
+    start highlightTicker
+
+-- | Finalize roll: calculate score, check target, update display
+finalizeRoll :: IORef GameState -> Text -> Text -> Text -> Text
+             -> Container -> Int -> Int
+             -> [DieResult]
+             -> IO ()
+finalizeRoll gameStateRef scoreText targetText diceCountText xyText
+             container screenW screenH results = do
+    gs <- readIORef gameStateRef
+
+    let rollScore = calculateScore results
+        newScore = gs_score gs + rollScore
+
+    -- Clear roll state
+    writeIORef gameStateRef $ gs {
+        gs_score = newScore,
+        gs_rollState = Nothing
+    }
+
+    -- Update score display
+    setText scoreText (toJSString $ "Score: " ++ show newScore)
+
+    -- Check if target reached
+    when (newScore >= gs_target gs) $
+        showChoiceDialog container screenW screenH
+                        gameStateRef scoreText targetText diceCountText xyText
+
+-- | Show choice dialog when target is reached
+showChoiceDialog :: Container -> Int -> Int
+                 -> IORef GameState -> Text -> Text -> Text -> Text
+                 -> IO ()
+showChoiceDialog container screenW screenH
+                 gameStateRef scoreText targetText diceCountText xyText = do
+    blipWithFreq 800.0  -- Success sound
+
+    -- Create modal container
+    modalContainer <- newContainer
+
+    -- Dim background
+    dimOverlay <- newGraphics
+    beginFillWithAlpha dimOverlay 0x000000 0.7
+    drawRect dimOverlay 0 0 (fromIntegral screenW) (fromIntegral screenH)
+    endFill dimOverlay
+    setEventMode dimOverlay "static"
+    void $ addChild modalContainer dimOverlay
+
+    -- Dialog box dimensions
+    let dialogW = 400.0
+        dialogH = 200.0
+        dialogX = (fromIntegral screenW - dialogW) / 2
+        dialogY = (fromIntegral screenH - dialogH) / 2
+
+    -- Dialog background
+    dialogBg <- newGraphics
+    beginFill dialogBg 0xFFFFFF
+    drawRoundedRect dialogBg dialogX dialogY dialogW dialogH 10.0
+    endFill dialogBg
+    void $ addChild modalContainer dialogBg
+
+    -- Title text
+    titleText <- newTextWithStyle "Target Reached!" "black"
+    setAnchor titleText 0.5 0.5
+    setX titleText (fromIntegral screenW / 2)
+    setY titleText (dialogY + 40)
+    void $ addChild modalContainer titleText
+
+    -- Subtitle
+    subtitleText <- newTextWithStyle "Choose your new die:" "gray"
+    setAnchor subtitleText 0.5 0.5
+    setX subtitleText (fromIntegral screenW / 2)
+    setY subtitleText (dialogY + 70)
+    void $ addChild modalContainer subtitleText
+
+    -- Choice buttons layout
+    let buttonY = dialogY + 130
+        buttonW = 150.0
+        buttonH = 50.0
+        gap = 20.0
+        leftX = fromIntegral screenW / 2 - buttonW - gap / 2
+        rightX = fromIntegral screenW / 2 + gap / 2
+
+    -- Additive button (green)
+    createChoiceButton modalContainer leftX buttonY buttonW buttonH
+                      "Additive (+)" 0x44FF44 $ do
+        void $ removeChild container modalContainer
+        applyChoice gameStateRef Additive scoreText targetText diceCountText xyText
+
+    -- Multiplicative button (inverted/dark)
+    createChoiceButton modalContainer rightX buttonY buttonW buttonH
+                      "Multiply (x)" 0x444444 $ do
+        void $ removeChild container modalContainer
+        applyChoice gameStateRef Multiplicative scoreText targetText diceCountText xyText
+
+    void $ addChild container modalContainer
+
+-- | Create a styled button for the choice dialog
+createChoiceButton :: Container -> Float -> Float -> Float -> Float
+                   -> String -> Int -> IO () -> IO ()
+createChoiceButton parent x y w h label color onClick = do
+    btnContainer <- newContainer
+    setX btnContainer x
+    setY btnContainer y
+    setEventMode btnContainer "static"
+    setCursor btnContainer "pointer"
+
+    -- Button background
+    bg <- newGraphics
+    beginFill bg color
+    drawRoundedRect bg 0 0 w h 5.0
+    endFill bg
+    void $ addChild btnContainer bg
+
+    -- Button text
+    btnText <- newTextWithStyle (toJSString label) "white"
+    setAnchor btnText 0.5 0.5
+    setX btnText (w / 2)
+    setY btnText (h / 2)
+    void $ addChild btnContainer btnText
+
+    on "pointerdown" btnContainer =<< jsFuncFromHs_ (\_ -> onClick)
+
+    void $ addChild parent btnContainer
+
+-- | Apply player's choice and advance game
+applyChoice :: IORef GameState -> DiceType -> Text -> Text -> Text -> Text -> IO ()
+applyChoice gameStateRef choice scoreText targetText diceCountText xyText = do
+    gs <- readIORef gameStateRef
+
+    let newAdditive = if choice == Additive
+                      then gs_additiveDice gs + 1
+                      else gs_additiveDice gs
+        newMultiplicative = if choice == Multiplicative
+                           then gs_multiplicativeDice gs + 1
+                           else gs_multiplicativeDice gs
+        newTarget = calculateNewTarget (gs_target gs) newAdditive newMultiplicative
+        newRound = gs_round gs + 1
+
+    writeIORef gameStateRef $ gs {
+        gs_score = 0,
+        gs_target = newTarget,
+        gs_additiveDice = newAdditive,
+        gs_multiplicativeDice = newMultiplicative,
+        gs_round = newRound
+    }
+
+    -- Update display
+    setText scoreText (toJSString "Score: 0")
+    setText targetText (toJSString $ "Target: " ++ show newTarget)
+    updateDiceCountDisplay diceCountText newAdditive newMultiplicative
+    setText xyText (toJSString "")  -- Clear X*Y display
+
+-- | Update the dice count display
+updateDiceCountDisplay :: Text -> Int -> Int -> IO ()
+updateDiceCountDisplay diceCountText additive multiplicative =
+    setText diceCountText (toJSString $
+        show additive ++ " additive | " ++ show multiplicative ++ " multiply")
 
 -- *****************************************************************************
 -- * Screen Rendering Functions
@@ -309,6 +727,21 @@ renderGameScreen spritesheetCtx app screenContainer screen_width screen_height g
     setAnchor score_text 0.5 0.5
     void $ addChild screenContainer score_text
 
+    -- Dice count display below score
+    dice_count_text <- newTextWithStyle (toJSString $
+        show gs_additiveDice ++ " additive | " ++ show gs_multiplicativeDice ++ " multiply") "gray"
+    setX dice_count_text (fromIntegral screen_width / 2.0)
+    setY dice_count_text (fromIntegral screen_height / 2.0 + 40.0)
+    setAnchor dice_count_text 0.5 0.5
+    void $ addChild screenContainer dice_count_text
+
+    -- X * Y = score display (shows current roll breakdown)
+    xy_text <- newTextWithStyle "" "gray"
+    setX xy_text (fromIntegral screen_width / 2.0)
+    setY xy_text (fromIntegral screen_height / 2.0 + 80.0)
+    setAnchor xy_text 0.5 0.5
+    void $ addChild screenContainer xy_text
+
     -- Buttons at the bottom
     let sample_button = Button {
         button_text = "Roll",
@@ -317,7 +750,7 @@ renderGameScreen spritesheetCtx app screenContainer screen_width screen_height g
         button_width = 100.0,
         button_height = 100.0,
         button_color = "black",
-        button_on_click = \_ -> rollAllDice spritesheetCtx app screenContainer screen_width screen_height game_state_ref score_text target_text
+        button_on_click = \_ -> rollAllDice spritesheetCtx app screenContainer screen_width screen_height game_state_ref score_text target_text dice_count_text xy_text
     }
     renderButton screenContainer sample_button
 
@@ -433,14 +866,6 @@ renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
     menuContainer <- renderMenu backMenu
     void $ addChild screenContainer menuContainer
     return ()
-
--- | Initial game state
-initialGameState :: GameState
-initialGameState = GameState {
-    gs_score = 0,
-    gs_target = 15,   -- Reasonable target for ~4 dice rolls on average
-    gs_numDice = 1
-}
 
 -- | Render a loading screen
 renderLoadingScreen :: Container -> Int -> Int -> IO ()
