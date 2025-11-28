@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, closeWindow, initDiceRenderer, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
+import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
 import Graphics.PixiJS
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
@@ -196,6 +196,9 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
                     return (r', g', b')
             let diceColor = fromString $ "0x" ++ toHex r ++ toHex g ++ toHex b
 
+            -- Create D6 materials once for this roll (not per frame!)
+            d6Materials <- createD6Materials diceColor
+
             -- Fixed timing (2 seconds total)
             let rollDuration = 1.5 :: Float    -- seconds
                 totalDuration = 2.0 :: Float   -- seconds (includes 0.5s hold)
@@ -238,7 +241,7 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
             void $ addChild container diceSprite
 
             -- Do initial render to the slot
-            renderDiceFrame diceRenderer slotIndex 0 0 0 diceColor 6
+            renderDiceFrame diceRenderer slotIndex 0 0 0 diceColor 6 d6Materials
 
             -- Create dedicated ticker for this animation
             animTicker <- newTicker
@@ -282,7 +285,7 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
                              else 0
 
                 -- Update dice in this slot
-                renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6
+                renderDiceFrame diceRenderer slotIndex rotX rotY rotZ diceColor 6 d6Materials
                 setX diceSprite currentX
                 setY diceSprite (currentY + bounce)
 

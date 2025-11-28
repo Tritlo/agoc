@@ -17,6 +17,7 @@ module Lib
     , isGamepadButtonPressed
       -- * Dice Rendering
     , initDiceRenderer
+    , createD6Materials
     , renderDiceFrame
     , acquireDiceSlot
     , releaseDiceSlot
@@ -437,6 +438,38 @@ foreign import javascript safe
   """
     initDiceRenderer :: Int -> IO JSVal
 
+-- | Create D6 materials with the given color.
+-- Returns a JSVal containing the array of 6 materials.
+-- Call this once per roll, not per frame.
+foreign import javascript safe
+  """
+  (() => {
+    const color = parseInt($1);
+    const hexColor = color.toString(16).padStart(6, '0');
+    const bgColor = '#' + hexColor;
+    const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
+    return d6FaceNumbers.map(num => {
+      const faceCanvas = new OffscreenCanvas(128, 128);
+      const faceCtx = faceCanvas.getContext('2d');
+      faceCtx.fillStyle = bgColor;
+      faceCtx.fillRect(0, 0, 128, 128);
+      faceCtx.font = 'bold 72px Arial';
+      faceCtx.textAlign = 'center';
+      faceCtx.textBaseline = 'middle';
+      faceCtx.strokeStyle = '#000000';
+      faceCtx.lineWidth = 3;
+      faceCtx.strokeText(num.toString(), 64, 68);
+      faceCtx.fillStyle = '#ffffff';
+      faceCtx.fillText(num.toString(), 64, 68);
+      return new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(faceCanvas)
+      });
+    });
+  })()
+  """
+    createD6Materials :: JSString  -- ^ Dice color (e.g., "0xffffff")
+                      -> IO JSVal  -- ^ Returns array of 6 materials
+
 -- | Render a dice frame to a specific slot using an existing renderer context.
 -- Parameters:
 --   $1: renderer context (from initDiceRenderer)
@@ -446,6 +479,7 @@ foreign import javascript safe
 --   $5: rotation Z (radians)
 --   $6: dice color (hex string like "0xffffff") - used for non-D6 dice
 --   $7: dice type (4=D4, 6=D6, 8=D8, 12=D12, 20=D20)
+--   $8: pre-created D6 materials (from createD6Materials), or null for non-D6 dice
 foreign import javascript safe
   """
   (() => {
@@ -456,6 +490,7 @@ foreign import javascript safe
     const rotZ = $5;
     const color = parseInt($6);
     const diceType = $7;
+    const d6Materials = $8;  // Pre-created D6 materials (or null for non-D6)
 
     // Update dice type if changed
     if (ctx.currentDiceType !== diceType) {
@@ -485,28 +520,8 @@ foreign import javascript safe
         case 6:
         default:
           geometry = new THREE.BoxGeometry(1, 1, 1);
-          // Create D6 materials with the provided color as background
-          const hexColor = color.toString(16).padStart(6, '0');
-          const bgColor = '#' + hexColor;
-          const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
-          material = d6FaceNumbers.map(num => {
-            const faceCanvas = new OffscreenCanvas(128, 128);
-            const faceCtx = faceCanvas.getContext('2d');
-            faceCtx.fillStyle = bgColor;
-            faceCtx.fillRect(0, 0, 128, 128);
-            // White text with dark outline for visibility
-            faceCtx.font = 'bold 72px Arial';
-            faceCtx.textAlign = 'center';
-            faceCtx.textBaseline = 'middle';
-            faceCtx.strokeStyle = '#000000';
-            faceCtx.lineWidth = 3;
-            faceCtx.strokeText(num.toString(), 64, 68);
-            faceCtx.fillStyle = '#ffffff';
-            faceCtx.fillText(num.toString(), 64, 68);
-            return new THREE.MeshBasicMaterial({
-              map: new THREE.CanvasTexture(faceCanvas)
-            });
-          });
+          // Use pre-created materials for D6
+          material = d6Materials;
           break;
       }
 
@@ -523,30 +538,9 @@ foreign import javascript safe
       ctx.dice.add(ctx.edgeLines);
     }
 
-    // For D6, always update materials with current color (since color can change each frame)
-    if (diceType === 6) {
-      const hexColor = color.toString(16).padStart(6, '0');
-      const bgColor = '#' + hexColor;
-      const d6FaceNumbers = [3, 4, 1, 6, 2, 5];
-      const newMaterials = d6FaceNumbers.map(num => {
-        const faceCanvas = new OffscreenCanvas(128, 128);
-        const faceCtx = faceCanvas.getContext('2d');
-        faceCtx.fillStyle = bgColor;
-        faceCtx.fillRect(0, 0, 128, 128);
-        // White text with dark outline for visibility
-        faceCtx.font = 'bold 72px Arial';
-        faceCtx.textAlign = 'center';
-        faceCtx.textBaseline = 'middle';
-        faceCtx.strokeStyle = '#000000';
-        faceCtx.lineWidth = 3;
-        faceCtx.strokeText(num.toString(), 64, 68);
-        faceCtx.fillStyle = '#ffffff';
-        faceCtx.fillText(num.toString(), 64, 68);
-        return new THREE.MeshBasicMaterial({
-          map: new THREE.CanvasTexture(faceCanvas)
-        });
-      });
-      ctx.dice.material = newMaterials;
+    // For D6, use the pre-created materials (no per-frame allocation!)
+    if (diceType === 6 && d6Materials) {
+      ctx.dice.material = d6Materials;
     }
 
     // Update rotation
@@ -592,6 +586,7 @@ foreign import javascript safe
                     -> Float    -- ^ Rotation Z (radians)
                     -> JSString -- ^ Dice color (e.g., "0xffffff") - used for non-D6 dice
                     -> Int      -- ^ Dice type (4, 6, 8, 12, or 20)
+                    -> JSVal    -- ^ Pre-created D6 materials (from createD6Materials)
                     -> IO ()
 
 -- | Acquire a dice slot from the pool for a new animation.
