@@ -59,7 +59,7 @@ test.describe('Dice Animation', () => {
     await page.goto('/');
 
     // Wait for WASM to initialize
-    const canvas = await page.waitForSelector('canvas', { timeout: 30000 });
+    const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
     // Wait for app to fully render
@@ -144,7 +144,7 @@ test.describe('Dice Animation', () => {
     await page.goto('/');
 
     // Wait for WASM to initialize
-    const canvas = await page.waitForSelector('canvas', { timeout: 30000 });
+    const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
     // Wait for app to fully render
@@ -203,7 +203,7 @@ test.describe('Dice Animation', () => {
     await page.goto('/');
 
     // Wait for WASM to initialize
-    const canvas = await page.waitForSelector('canvas', { timeout: 30000 });
+    const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
     // Wait for app to fully render

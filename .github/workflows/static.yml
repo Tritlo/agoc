@@ -53,6 +53,7 @@ jobs:
 
       - name: Run Playwright tests
         continue-on-error: true
+        timeout-minutes: 5
         run: |
           nix develop --command bash -c "npx playwright test"
 

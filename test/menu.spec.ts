@@ -6,7 +6,7 @@ test.describe('Menu System', () => {
     await page.goto('/');
 
     // Wait for WASM to initialize (canvas should be added to the page)
-    const canvas = await page.waitForSelector('canvas', { timeout: 30000 });
+    const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
 
     // Wait for the app to fully initialize
