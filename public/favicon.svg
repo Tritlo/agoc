@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- D8 octahedron - simple geometric design -->
+  <!-- Background -->
+  <rect width="64" height="64" fill="#1a1a2e"/>
+
+  <!-- D8 shape - octahedron viewed from 3/4 angle -->
+  <!-- Top face (lighter) -->
+  <polygon points="32,8 48,28 32,32 16,28" fill="#6366f1"/>
+
+  <!-- Left face (medium) -->
+  <polygon points="16,28 32,32 32,56 16,36" fill="#4f46e5"/>
+
+  <!-- Right face (darker) -->
+  <polygon points="48,28 32,32 32,56 48,36" fill="#3730a3"/>
+
+  <!-- Top highlight edge -->
+  <line x1="32" y1="8" x2="32" y2="32" stroke="#818cf8" stroke-width="1"/>
+
+  <!-- Number 8 on front -->
+  <text x="32" y="44" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#e0e7ff" text-anchor="middle">8</text>
+</svg>
