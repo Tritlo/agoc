@@ -426,11 +426,14 @@ renderGameScreen diceRenderer app screenContainer screen_width screen_height gam
 
 -- | Render the pause menu screen
 renderPauseMenu :: Application -> Container -> Int -> Int
+                -> IORef Settings
+                -> IORef JSVal  -- ^ Dice renderer ref
                 -> (IO ())  -- ^ Action to continue game
                 -> (IO ())  -- ^ Action to quit to start screen
                 -> IO ()
-renderPauseMenu _app screenContainer screen_width screen_height continueGame quitGame = do
+renderPauseMenu _app screenContainer screen_width screen_height settings_ref diceRendererRef continueGame quitGame = do
     clearScreen screenContainer
+    settings <- readIORef settings_ref
 
     -- Title
     title <- newTextWithStyle (toJSString "Paused") "black"
@@ -439,6 +442,56 @@ renderPauseMenu _app screenContainer screen_width screen_height continueGame qui
     setAnchor title 0.5 0.5
     void $ addChild screenContainer title
 
+    -- FPS setting
+    fpsLabel <- newTextWithStyle (toJSString "Framerate:") "black"
+    setX fpsLabel (fromIntegral screen_width / 2.0 - 80.0)
+    setY fpsLabel 220.0
+    setAnchor fpsLabel 0.5 0.5
+    void $ addChild screenContainer fpsLabel
+
+    fpsValueRef <- newIORef (settings_fps settings)
+    fpsValue <- newTextWithStyle (toJSString $ show (settings_fps settings) ++ " FPS") "blue"
+    setX fpsValue (fromIntegral screen_width / 2.0 + 60.0)
+    setY fpsValue 220.0
+    setAnchor fpsValue 0.5 0.5
+    setInteractive fpsValue True
+    setCursor fpsValue "pointer"
+    on "pointerdown" fpsValue =<< jsFuncFromHs_ (\_ -> do
+        currentFps <- readIORef fpsValueRef
+        let newFps = cycleFPS currentFps
+        writeIORef fpsValueRef newFps
+        setText fpsValue (toJSString $ show newFps ++ " FPS")
+        currentSettings <- readIORef settings_ref
+        writeIORef settings_ref (currentSettings { settings_fps = newFps })
+        localStorageSet "settings_fps" (toJSString $ show newFps))
+    void $ addChild screenContainer fpsValue
+
+    -- Resolution setting
+    resLabel <- newTextWithStyle (toJSString "Resolution:") "black"
+    setX resLabel (fromIntegral screen_width / 2.0 - 80.0)
+    setY resLabel 270.0
+    setAnchor resLabel 0.5 0.5
+    void $ addChild screenContainer resLabel
+
+    resValueRef <- newIORef (settings_resolution settings)
+    resValue <- newTextWithStyle (toJSString $ show (settings_resolution settings) ++ "x" ++ show (settings_resolution settings)) "blue"
+    setX resValue (fromIntegral screen_width / 2.0 + 60.0)
+    setY resValue 270.0
+    setAnchor resValue 0.5 0.5
+    setInteractive resValue True
+    setCursor resValue "pointer"
+    on "pointerdown" resValue =<< jsFuncFromHs_ (\_ -> do
+        currentRes <- readIORef resValueRef
+        let newRes = cycleResolution currentRes
+        writeIORef resValueRef newRes
+        setText resValue (toJSString $ show newRes ++ "x" ++ show newRes)
+        currentSettings <- readIORef settings_ref
+        writeIORef settings_ref (currentSettings { settings_resolution = newRes })
+        localStorageSet "settings_resolution" (toJSString $ show newRes)
+        newDiceRenderer <- initDiceRenderer newRes
+        writeIORef diceRendererRef newDiceRenderer)
+    void $ addChild screenContainer resValue
+
     -- Menu
     let pauseMenu = Menu {
         menu_items = [
@@ -446,7 +499,7 @@ renderPauseMenu _app screenContainer screen_width screen_height continueGame qui
             MenuItem { menuItem_text = "Quit", menuItem_action = quitGame }
         ],
         menu_x = fromIntegral screen_width / 2.0,
-        menu_y = fromIntegral screen_height / 2.0,
+        menu_y = fromIntegral screen_height / 2.0 + 80.0,
         menu_spacing = 60.0,
         menu_color = "black",
         menu_hoverColor = "blue"
@@ -670,7 +723,7 @@ main = do
 
     writeIORef showPauseMenuRef $
         renderPauseMenu app screenContainer screen_width screen_height
-            showGameScreen quitToStart
+            settings_ref diceRendererRef showGameScreen quitToStart
 
     -- Start at the start screen
     showStartScreen
