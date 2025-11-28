@@ -44,10 +44,14 @@ library
     build-depends:
         base,
         ghc-experimental,
-        pixijs-ffi
+        pixijs-ffi,
+        aeson,
+        splitmix-distributions,
+        containers
     default-language: GHC2021
     exposed-modules:
         Lib
+        Histogram
 
 
 executable agoc

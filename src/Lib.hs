@@ -303,21 +303,42 @@ foreign import javascript safe
   """
   (() => {
     const size = $1;
-    const initialSlots = 20;
-    const slotPadding = 5;  // Padding between slots to prevent texture sampling bleed
+    const slotsPerRow = 16;   // 2D grid: 16 slots per row
+    const numRows = 8;        // 8 rows = 128 slots per canvas
+    const slotsPerCanvas = slotsPerRow * numRows;
+    const maxCanvases = 8;    // Up to 8 canvases = 1024 total slots
+    const slotPadding = 10;   // 10px padding between slots
     const slotStride = size + slotPadding;
+    const frameExtra = 5;     // PixiJS frame includes 5px of padding on each side
 
-    // Create offscreen canvas (persistent) - start with 20 slots to avoid lag
-    const canvas = new OffscreenCanvas(slotStride * initialSlots, size);
+    const canvasWidth = slotStride * slotsPerRow;
+    const canvasHeight = slotStride * numRows;
 
-    // Create Three.js renderer (persistent)
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvas,
-      antialias: true,
-      alpha: true
-    });
-    renderer.setSize(slotStride * initialSlots, size, false);
-    renderer.setClearColor(0x000000, 0);
+    // Helper to create a new canvas with renderer and texture
+    const createCanvasContext = () => {
+      const canvas = new OffscreenCanvas(canvasWidth, canvasHeight);
+      const renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: true
+      });
+      renderer.setSize(canvasWidth, canvasHeight, false);
+      renderer.setClearColor(0x000000, 0);
+
+      // Clear to transparent
+      renderer.setScissorTest(false);
+      renderer.clear();
+
+      const texture = PIXI.Texture.from(canvas);
+      texture.source.scaleMode = 'nearest';
+
+      return { canvas, renderer, texture };
+    };
+
+    // Create first canvas
+    const canvasContexts = [createCanvasContext()];
+    const canvas = canvasContexts[0].canvas;
+    const renderer = canvasContexts[0].renderer;
 
     // Create scene (persistent)
     const scene = new THREE.Scene();
@@ -382,32 +403,19 @@ foreign import javascript safe
     // Store current dice type to avoid recreating geometry unnecessarily
     let currentDiceType = 6;
 
-    // Slot pool management for concurrent dice animations
+    // Slot pool management for concurrent dice animations (2D grid, multi-canvas)
     const slotSize = size;
-    let numSlots = initialSlots;
-    const freeSlots = Array.from({length: initialSlots}, (_, i) => i);  // [0, 1, ..., 19]
-    const stride = slotStride;  // slotSize + padding
+    const stride = slotStride;
+    const paddingOffset = slotPadding / 2;  // 5px offset to center dice in cell
 
-    // Clear entire canvas to transparent to prevent uninitialized white pixels
-    const gl = renderer.getContext();
-    renderer.setScissorTest(false);  // Disable scissor to clear entire canvas
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    // Do an initial render so the canvas has content
-    renderer.render(scene, camera);
-
-    // Create a persistent PixiJS texture from the canvas (created ONCE)
-    // This avoids PixiJS texture caching issues - we'll update this texture each frame
-    const texture = PIXI.Texture.from(canvas);
-
-    // Use nearest filtering to prevent sub-pixel sampling at edges
-    texture.source.scaleMode = 'nearest';
+    // Free slots: array of {canvasIndex, localSlot} objects
+    // Start with all slots from first canvas
+    const freeSlots = Array.from({length: slotsPerCanvas}, (_, i) => ({canvasIndex: 0, localSlot: i}));
 
     // Return renderer context object
     return {
-      canvas,
-      renderer,
+      canvasContexts,
+      createCanvasContext,
       scene,
       camera,
       dice,
@@ -415,11 +423,15 @@ foreign import javascript safe
       currentGeometry,
       currentDiceType,
       edgeLines,
-      texture,
       slotSize,
       stride,
-      numSlots,
-      freeSlots
+      slotsPerRow,
+      slotsPerCanvas,
+      maxCanvases,
+      numRows,
+      freeSlots,
+      paddingOffset,
+      frameExtra
     };
   })()
   """
@@ -542,20 +554,35 @@ foreign import javascript safe
     ctx.dice.rotation.y = rotY;
     ctx.dice.rotation.z = rotZ;
 
-    // Set viewport and scissor to render only to this slot's region
-    const slotX = slotIndex * ctx.stride;
-    ctx.renderer.setViewport(slotX, 0, ctx.slotSize, ctx.slotSize);
-    ctx.renderer.setScissor(slotX, 0, ctx.slotSize, ctx.slotSize);
-    ctx.renderer.setScissorTest(true);
+    // Decode global slot ID into canvas index and local slot
+    const canvasIndex = Math.floor(slotIndex / ctx.slotsPerCanvas);
+    const localSlot = slotIndex % ctx.slotsPerCanvas;
+    const canvasCtx = ctx.canvasContexts[canvasIndex];
 
-    // Clear this slot region before rendering
-    ctx.renderer.clear();
+    // Calculate 2D position in the grid
+    const col = localSlot % ctx.slotsPerRow;
+    const row = Math.floor(localSlot / ctx.slotsPerRow);
+    // WebGL Y is bottom-up, so flip the row
+    const cellX = col * ctx.stride;
+    const cellY = (ctx.numRows - 1 - row) * ctx.stride;
+
+    // First clear the entire cell (including padding) to transparent
+    canvasCtx.renderer.setViewport(cellX, cellY, ctx.stride, ctx.stride);
+    canvasCtx.renderer.setScissor(cellX, cellY, ctx.stride, ctx.stride);
+    canvasCtx.renderer.setScissorTest(true);
+    canvasCtx.renderer.clear();
+
+    // Then set viewport/scissor to just the dice area (centered with padding)
+    const slotX = cellX + ctx.paddingOffset;
+    const slotY = cellY + ctx.paddingOffset;
+    canvasCtx.renderer.setViewport(slotX, slotY, ctx.slotSize, ctx.slotSize);
+    canvasCtx.renderer.setScissor(slotX, slotY, ctx.slotSize, ctx.slotSize);
 
     // Render Three.js scene to the slot region
-    ctx.renderer.render(ctx.scene, ctx.camera);
+    canvasCtx.renderer.render(ctx.scene, ctx.camera);
 
     // Force PixiJS to re-read the canvas content
-    ctx.texture.source.update();
+    canvasCtx.texture.source.update();
   })()
   """
     renderDiceFrame :: JSVal    -- ^ Renderer context
@@ -568,30 +595,33 @@ foreign import javascript safe
                     -> IO ()
 
 -- | Acquire a dice slot from the pool for a new animation.
--- Returns the slot index. Grows the canvas if no slots are available.
+-- Returns the global slot index, or -1 if no slots available.
+-- Allocates new canvases as needed, up to maxCanvases.
 foreign import javascript safe
   """
   (() => {
     const ctx = $1;
 
     if (ctx.freeSlots.length === 0) {
-      // Grow canvas horizontally to add a new slot
-      ctx.numSlots++;
-      ctx.canvas.width = ctx.stride * ctx.numSlots;
+      // No free slots, try to allocate a new canvas
+      if (ctx.canvasContexts.length >= ctx.maxCanvases) {
+        // At max canvases, return -1 to signal no slot available
+        return -1;
+      }
 
-      // Resize the WebGL renderer to match
-      ctx.renderer.setSize(ctx.stride * ctx.numSlots, ctx.slotSize, false);
+      // Create a new canvas
+      const newCanvasIndex = ctx.canvasContexts.length;
+      ctx.canvasContexts.push(ctx.createCanvasContext());
 
-      // Add the new slot to the free pool
-      ctx.freeSlots.push(ctx.numSlots - 1);
-
-      // Update the existing texture source instead of destroying it
-      // This keeps existing sprites working while allowing new ones to use the expanded canvas
-      ctx.texture.source.resize(ctx.stride * ctx.numSlots, ctx.slotSize);
-      ctx.texture.source.update();
+      // Add all slots from new canvas to free pool
+      for (let i = 0; i < ctx.slotsPerCanvas; i++) {
+        ctx.freeSlots.push({canvasIndex: newCanvasIndex, localSlot: i});
+      }
     }
 
-    return ctx.freeSlots.pop();
+    // Pop a free slot and convert to global slot ID
+    const slot = ctx.freeSlots.pop();
+    return slot.canvasIndex * ctx.slotsPerCanvas + slot.localSlot;
   })()
   """
     acquireDiceSlot :: JSVal -> IO Int
@@ -599,24 +629,45 @@ foreign import javascript safe
 -- | Release a dice slot back to the pool after animation completes.
 foreign import javascript unsafe
   """
-  $1.freeSlots.push($2);
+  (() => {
+    const ctx = $1;
+    const globalSlot = $2;
+    const canvasIndex = Math.floor(globalSlot / ctx.slotsPerCanvas);
+    const localSlot = globalSlot % ctx.slotsPerCanvas;
+    ctx.freeSlots.push({canvasIndex, localSlot});
+  })()
   """
     releaseDiceSlot :: JSVal -> Int -> IO ()
 
 -- | Get a PixiJS texture for a specific dice slot.
 -- Returns a texture with a frame rectangle that views only that slot's region.
+-- The frame includes frameExtra (5px) of padding on each side of the dice.
 foreign import javascript safe
   """
   (() => {
     const ctx = $1;
-    const slotIndex = $2;
+    const globalSlot = $2;
+
+    // Decode global slot ID into canvas index and local slot
+    const canvasIndex = Math.floor(globalSlot / ctx.slotsPerCanvas);
+    const localSlot = globalSlot % ctx.slotsPerCanvas;
+    const canvasCtx = ctx.canvasContexts[canvasIndex];
+
+    // Calculate 2D position in the grid
+    const col = localSlot % ctx.slotsPerRow;
+    const row = Math.floor(localSlot / ctx.slotsPerRow);
+    // PixiJS Y is top-down (0,0 at top-left)
+    // Frame includes 5px padding on each side (frameExtra on each side)
+    const frameX = col * ctx.stride;
+    const frameY = row * ctx.stride;
+    const frameSize = ctx.slotSize + ctx.frameExtra * 2;  // slotSize + 10 (5 on each side)
 
     const frame = new PIXI.Rectangle(
-      slotIndex * ctx.stride, 0,
-      ctx.slotSize, ctx.slotSize
+      frameX, frameY,
+      frameSize, frameSize
     );
 
-    return new PIXI.Texture({ source: ctx.texture.source, frame: frame });
+    return new PIXI.Texture({ source: canvasCtx.texture.source, frame: frame });
   })()
   """
     getDiceSlotTexture :: JSVal -> Int -> IO JSVal
