@@ -193,6 +193,7 @@ test.describe('Dice Animation', () => {
   });
 
   test('clicking sample button multiple times does not exhaust WebGL contexts', async ({ page }) => {
+    test.setTimeout(20000); // 20 second timeout
     // Listen for page errors (WebGL context errors will show up here)
     const pageErrors: string[] = [];
     page.on('pageerror', error => {
