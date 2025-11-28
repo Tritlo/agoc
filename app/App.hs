@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
+import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, disposeD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
 import Graphics.PixiJS
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
@@ -294,6 +294,7 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
                     stop ticker
                     void $ removeChild container diceSprite
                     releaseDiceSlot diceRenderer slotIndex
+                    disposeD6Materials d6Materials  -- Free GPU memory
                     onComplete
 
             add animTicker tickerCallback

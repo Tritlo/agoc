@@ -18,6 +18,7 @@ module Lib
       -- * Dice Rendering
     , initDiceRenderer
     , createD6Materials
+    , disposeD6Materials
     , renderDiceFrame
     , acquireDiceSlot
     , releaseDiceSlot
@@ -469,6 +470,22 @@ foreign import javascript safe
   """
     createD6Materials :: JSString  -- ^ Dice color (e.g., "0xffffff")
                       -> IO JSVal  -- ^ Returns array of 6 materials
+
+-- | Dispose D6 materials to free GPU memory.
+-- Call this when the dice animation completes.
+foreign import javascript safe
+  """
+  (() => {
+    const materials = $1;
+    if (materials && Array.isArray(materials)) {
+      materials.forEach(m => {
+        if (m.map) m.map.dispose();
+        m.dispose();
+      });
+    }
+  })()
+  """
+    disposeD6Materials :: JSVal -> IO ()
 
 -- | Render a dice frame to a specific slot using an existing renderer context.
 -- Parameters:
