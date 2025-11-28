@@ -26,9 +26,11 @@ curl -f -L https://observablehq.com/plot/plot.min.js -o public/vendor/plot/plot.
 # Download D3
 curl -f -L https://observablehq.com/plot/d3.min.js -o public/vendor/d3/d3.min.js
 
-# Download Three.js (ES module build)
+# Download Three.js (ES module builds)
 echo "Downloading Three.js..."
 curl -f -L https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.module.min.js -o public/vendor/three@0.181.0/build/three.module.min.js
+curl -f -L https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.core.min.js -o public/vendor/three@0.181.0/build/three.core.min.js
+curl -f -L https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.webgpu.min.js -o public/vendor/three@0.181.0/build/three.webgpu.min.js
 
 # Verify downloads
 if [ ! -f "public/vendor/pixi.js@8.0.0/dist/pixi.min.js" ]; then
@@ -52,11 +54,21 @@ if [ ! -f "public/vendor/d3/d3.min.js" ]; then
 fi
 
 if [ ! -f "public/vendor/three@0.181.0/build/three.module.min.js" ]; then
-    echo "Error: Failed to download Three.js"
+    echo "Error: Failed to download Three.js module"
+    exit 1
+fi
+
+if [ ! -f "public/vendor/three@0.181.0/build/three.core.min.js" ]; then
+    echo "Error: Failed to download Three.js core"
+    exit 1
+fi
+
+if [ ! -f "public/vendor/three@0.181.0/build/three.webgpu.min.js" ]; then
+    echo "Error: Failed to download Three.js webgpu"
     exit 1
 fi
 
 echo "✓ Successfully vendored all dependencies"
 ls -lh public/vendor/pixi.js@8.0.0/dist/pixi.min.js public/vendor/@runno/wasi@0.7.0/dist/wasi.js
 ls -lh public/vendor/plot/plot.min.js public/vendor/d3/d3.min.js
-ls -lh public/vendor/three@0.181.0/build/three.module.min.js
+ls -lh public/vendor/three@0.181.0/build/
