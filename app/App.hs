@@ -150,9 +150,11 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
             startXOffset <- randomRIO (-50.0, 50.0) :: IO Float
             startYOffset <- randomRIO (-30.0, 30.0) :: IO Float
 
-            -- Random end position (around center)
-            endXOffset <- randomRIO (-60.0, 60.0) :: IO Float
-            endYOffset <- randomRIO (-40.0, 40.0) :: IO Float
+            -- Random end position (in top half of screen)
+            let topHalfHeight = fromIntegral screenH / 2
+                halfWidth = fromIntegral screenW / 2
+            endXOffset <- randomRIO (-halfWidth * 0.7, halfWidth * 0.7) :: IO Float
+            endYOffset <- randomRIO (-topHalfHeight * 0.4, topHalfHeight * 0.4) :: IO Float
 
             -- Random number of full rotations per axis (1-6)
             numRotsX <- randomRIO (1, 6) :: IO Int
@@ -199,13 +201,13 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
                 totalDuration = 2.0 :: Float   -- seconds (includes 0.5s hold)
 
             let centerX = fromIntegral screenW / 2
-                centerY = fromIntegral screenH / 2
+                topHalfY = fromIntegral screenH / 4  -- Center of top half
                 buttonY = fromIntegral screenH - 150
 
                 startX = centerX + startXOffset
                 startY = buttonY + startYOffset
                 endX = centerX + endXOffset
-                endY = centerY + endYOffset
+                endY = topHalfY + endYOffset
 
                 -- Target rotation to land on specific face
                 -- BoxGeometry face order: +X(3), -X(4), +Y(1), -Y(6), +Z(2), -Z(5)
