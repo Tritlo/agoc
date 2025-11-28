@@ -25,6 +25,9 @@ module Lib
     , getDiceSlotTexture
       -- * Window Management
     , closeWindow
+      -- * Local Storage
+    , localStorageGet
+    , localStorageSet
     ) where
 
 import GHC.Wasm.Prim
@@ -700,3 +703,15 @@ foreign import javascript unsafe
   }
   """
     closeWindow :: IO ()
+
+-- *****************************************************************************
+-- * Local Storage
+-- *****************************************************************************
+
+-- | Get a value from localStorage, returns empty string if not found
+foreign import javascript unsafe "localStorage.getItem($1) || ''"
+    localStorageGet :: JSString -> IO JSString
+
+-- | Set a value in localStorage
+foreign import javascript unsafe "localStorage.setItem($1, $2)"
+    localStorageSet :: JSString -> JSString -> IO ()

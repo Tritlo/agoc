@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, disposeD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture)
+import Lib (blipWithFreq, closeWindow, initDiceRenderer, createD6Materials, disposeD6Materials, renderDiceFrame, acquireDiceSlot, releaseDiceSlot, getDiceSlotTexture, localStorageGet, localStorageSet)
 import Graphics.PixiJS
 import Data.String (IsString(..))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
@@ -126,6 +126,30 @@ data GameState = GameState {
     gs_numDice :: Int  -- Number of dice to roll (increases when target is reached)
 } deriving (Show, Eq)
 
+-- | Graphics settings (persisted to localStorage)
+data Settings = Settings {
+    settings_fps :: Int,        -- 30, 60, or 90
+    settings_resolution :: Int  -- 32, 64, or 128
+} deriving (Show, Eq)
+
+defaultSettings :: Settings
+defaultSettings = Settings {
+    settings_fps = 30,
+    settings_resolution = 64
+}
+
+-- | Cycle FPS to next value
+cycleFPS :: Int -> Int
+cycleFPS 30 = 60
+cycleFPS 60 = 90
+cycleFPS _  = 30
+
+-- | Cycle resolution to next value
+cycleResolution :: Int -> Int
+cycleResolution 32  = 64
+cycleResolution 64  = 128
+cycleResolution _   = 32
+
 -- | Helper to convert Int to 2-digit hex string
 toHex :: Int -> String
 toHex n = let h = showHex n "" in if length h == 1 then '0':h else h
@@ -133,8 +157,8 @@ toHex n = let h = showHex n "" in if length h == 1 then '0':h else h
 -- | Play a spinning dice animation with randomized trajectory
 -- Uses time-based animation (2 seconds total) with exact final face landing
 -- Each animation gets its own slot in the spritesheet for concurrent animations
-playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> IO () -> IO ()
-playDiceAnimation diceRenderer _app container screenW screenH finalFace onComplete = do
+playDiceAnimation :: JSVal -> Application -> Container -> Int -> Int -> Int -> Settings -> IO () -> IO ()
+playDiceAnimation diceRenderer _app container screenW screenH finalFace settings onComplete = do
     -- Acquire a slot for this animation
     slotIndex <- acquireDiceSlot diceRenderer
 
@@ -238,6 +262,9 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
             setX diceSprite startX
             setY diceSprite startY
             setAnchor diceSprite 0.5 0.5
+            -- Scale sprite up to display at 128x128 regardless of render resolution
+            let scaleFactor = 128.0 / fromIntegral (settings_resolution settings)
+            setScale diceSprite scaleFactor scaleFactor
             void $ addChild container diceSprite
 
             -- Do initial render to the slot
@@ -245,7 +272,7 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
 
             -- Create dedicated ticker for this animation
             animTicker <- newTicker
-            setMaxFPS animTicker 30  -- Lower FPS for mobile performance
+            setMaxFPS animTicker (fromIntegral $ settings_fps settings)
 
             -- Track elapsed time and frame count for skip optimization
             elapsedRef <- newIORef (0.0 :: Float)
@@ -314,9 +341,10 @@ playDiceAnimation diceRenderer _app container screenW screenH finalFace onComple
 
 -- | Roll the current number of dice (gs_numDice) simultaneously
 rollAllDice :: JSVal -> Application -> Container -> Int -> Int
-            -> IORef GameState -> Text -> Text -> IO ()
-rollAllDice diceRenderer app container screenW screenH game_state_ref score_text target_text = do
+            -> IORef GameState -> IORef Settings -> Text -> Text -> IO ()
+rollAllDice diceRenderer app container screenW screenH game_state_ref settings_ref score_text target_text = do
     GameState{..} <- readIORef game_state_ref
+    settings <- readIORef settings_ref
     -- Track how many dice have completed
     completedRef <- newIORef (0 :: Int)
     -- Roll all dice simultaneously
@@ -328,7 +356,7 @@ rollAllDice diceRenderer app container screenW screenH game_state_ref score_text
                 -- Track completion
                 completed <- readIORef completedRef
                 writeIORef completedRef (completed + 1)
-        playDiceAnimation diceRenderer app container screenW screenH finalFace onComplete
+        playDiceAnimation diceRenderer app container screenW screenH finalFace settings onComplete
 
 -- | Update score after a dice roll. Increments numDice when target is reached.
 updateScore :: IORef GameState -> Text -> Text -> Int -> IO ()
@@ -352,9 +380,10 @@ updateScore game_state_ref score_text target_text diceResult = do
 
 -- | Render the game screen (the main gameplay)
 renderGameScreen :: JSVal -> Application -> Container -> Int -> Int -> IORef GameState
+                 -> IORef Settings
                  -> (IO ())  -- ^ Action to show pause menu
                  -> IO ()
-renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref showPauseMenu = do
+renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref showPauseMenu = do
     clearScreen screenContainer
 
     GameState{..} <- readIORef game_state_ref
@@ -380,7 +409,7 @@ renderGameScreen diceRenderer app screenContainer screen_width screen_height gam
         button_width = 100.0,
         button_height = 100.0,
         button_color = "black",
-        button_on_click = \_ -> rollAllDice diceRenderer app screenContainer screen_width screen_height game_state_ref score_text target_text
+        button_on_click = \_ -> rollAllDice diceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref score_text target_text
     }
     renderButton screenContainer sample_button
 
@@ -462,10 +491,13 @@ renderStartScreen _app screenContainer screen_width screen_height showGame showO
 
 -- | Render the options screen
 renderOptionsScreen :: Application -> Container -> Int -> Int
+                    -> IORef Settings
+                    -> IORef JSVal  -- ^ Dice renderer ref (to reinitialize on resolution change)
                     -> (IO ())  -- ^ Action to go back to start screen
                     -> IO ()
-renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
+renderOptionsScreen _app screenContainer screen_width screen_height settings_ref diceRendererRef goBack = do
     clearScreen screenContainer
+    settings <- readIORef settings_ref
 
     -- Title
     title <- newTextWithStyle (toJSString "Options") "black"
@@ -474,12 +506,64 @@ renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
     setAnchor title 0.5 0.5
     void $ addChild screenContainer title
 
-    -- Placeholder text
-    placeholder <- newTextWithStyle (toJSString "(No options yet)") "gray"
-    setX placeholder (fromIntegral screen_width / 2.0)
-    setY placeholder (fromIntegral screen_height / 2.0 - 50.0)
-    setAnchor placeholder 0.5 0.5
-    void $ addChild screenContainer placeholder
+    -- FPS label
+    fpsLabel <- newTextWithStyle (toJSString "Framerate:") "black"
+    setX fpsLabel (fromIntegral screen_width / 2.0 - 80.0)
+    setY fpsLabel (fromIntegral screen_height / 2.0 - 80.0)
+    setAnchor fpsLabel 0.5 0.5
+    void $ addChild screenContainer fpsLabel
+
+    -- FPS value (clickable)
+    fpsValueRef <- newIORef (settings_fps settings)
+    fpsValue <- newTextWithStyle (toJSString $ show (settings_fps settings) ++ " FPS") "blue"
+    setX fpsValue (fromIntegral screen_width / 2.0 + 60.0)
+    setY fpsValue (fromIntegral screen_height / 2.0 - 80.0)
+    setAnchor fpsValue 0.5 0.5
+    setInteractive fpsValue True
+    setCursor fpsValue "pointer"
+    on "pointerdown" fpsValue =<< jsFuncFromHs_ (\_ -> do
+        currentFps <- readIORef fpsValueRef
+        let newFps = cycleFPS currentFps
+        writeIORef fpsValueRef newFps
+        setText fpsValue (toJSString $ show newFps ++ " FPS")
+        -- Update settings
+        currentSettings <- readIORef settings_ref
+        let newSettings = currentSettings { settings_fps = newFps }
+        writeIORef settings_ref newSettings
+        -- Save to localStorage
+        localStorageSet "settings_fps" (toJSString $ show newFps))
+    void $ addChild screenContainer fpsValue
+
+    -- Resolution label
+    resLabel <- newTextWithStyle (toJSString "Resolution:") "black"
+    setX resLabel (fromIntegral screen_width / 2.0 - 80.0)
+    setY resLabel (fromIntegral screen_height / 2.0 - 20.0)
+    setAnchor resLabel 0.5 0.5
+    void $ addChild screenContainer resLabel
+
+    -- Resolution value (clickable)
+    resValueRef <- newIORef (settings_resolution settings)
+    resValue <- newTextWithStyle (toJSString $ show (settings_resolution settings) ++ "x" ++ show (settings_resolution settings)) "blue"
+    setX resValue (fromIntegral screen_width / 2.0 + 60.0)
+    setY resValue (fromIntegral screen_height / 2.0 - 20.0)
+    setAnchor resValue 0.5 0.5
+    setInteractive resValue True
+    setCursor resValue "pointer"
+    on "pointerdown" resValue =<< jsFuncFromHs_ (\_ -> do
+        currentRes <- readIORef resValueRef
+        let newRes = cycleResolution currentRes
+        writeIORef resValueRef newRes
+        setText resValue (toJSString $ show newRes ++ "x" ++ show newRes)
+        -- Update settings
+        currentSettings <- readIORef settings_ref
+        let newSettings = currentSettings { settings_resolution = newRes }
+        writeIORef settings_ref newSettings
+        -- Save to localStorage
+        localStorageSet "settings_resolution" (toJSString $ show newRes)
+        -- Reinitialize dice renderer with new resolution
+        newDiceRenderer <- initDiceRenderer newRes
+        writeIORef diceRendererRef newDiceRenderer)
+    void $ addChild screenContainer resValue
 
     -- Back menu
     let backMenu = Menu {
@@ -487,7 +571,7 @@ renderOptionsScreen _app screenContainer screen_width screen_height goBack = do
             MenuItem { menuItem_text = "Back", menuItem_action = goBack }
         ],
         menu_x = fromIntegral screen_width / 2.0,
-        menu_y = fromIntegral screen_height / 2.0 + 50.0,
+        menu_y = fromIntegral screen_height / 2.0 + 80.0,
         menu_spacing = 60.0,
         menu_color = "black",
         menu_hoverColor = "blue"
@@ -504,6 +588,19 @@ initialGameState = GameState {
     gs_target = 15,   -- Reasonable target for ~4 dice rolls on average
     gs_numDice = 1
 }
+
+-- | Load settings from localStorage or use defaults
+loadSettings :: IO Settings
+loadSettings = do
+    fpsStr <- localStorageGet "settings_fps"
+    resStr <- localStorageGet "settings_resolution"
+    let fps = case reads (fromJSString fpsStr) of
+                [(n, "")] | n `elem` [30, 60, 90] -> n
+                _ -> settings_fps defaultSettings
+    let res = case reads (fromJSString resStr) of
+                [(n, "")] | n `elem` [32, 64, 128] -> n
+                _ -> settings_resolution defaultSettings
+    return Settings { settings_fps = fps, settings_resolution = res }
 
 main :: IO ()
 main = do
@@ -522,8 +619,13 @@ main = do
     -- Initialize game state
     game_state_ref <- newIORef initialGameState
 
-    -- Initialize persistent dice renderer (single WebGL context for all dice animations)
-    diceRenderer <- initDiceRenderer 64  -- Smaller for mobile performance
+    -- Load settings from localStorage or use defaults
+    settings <- loadSettings
+    settings_ref <- newIORef settings
+
+    -- Initialize persistent dice renderer with configured resolution
+    diceRenderer <- initDiceRenderer (settings_resolution settings)
+    diceRendererRef <- newIORef diceRenderer
 
     -- Define screen transition functions using mutual recursion via IORefs
     showStartScreenRef <- newIORef (return () :: IO ())
@@ -559,10 +661,11 @@ main = do
 
     writeIORef showOptionsScreenRef $
         renderOptionsScreen app screenContainer screen_width screen_height
-            showStartScreen
+            settings_ref diceRendererRef showStartScreen
 
-    writeIORef showGameScreenRef $
-        renderGameScreen diceRenderer app screenContainer screen_width screen_height game_state_ref
+    writeIORef showGameScreenRef $ do
+        currentDiceRenderer <- readIORef diceRendererRef
+        renderGameScreen currentDiceRenderer app screenContainer screen_width screen_height game_state_ref settings_ref
             showPauseMenu
 
     writeIORef showPauseMenuRef $
