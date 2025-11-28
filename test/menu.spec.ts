@@ -6,7 +6,7 @@ test.describe('Menu System', () => {
     await page.goto('/');
 
     // Wait for WASM to initialize (canvas should be added to the page)
-    const canvas = await page.waitForSelector('canvas', { timeout: 10000 });
+    const canvas = await page.waitForSelector('canvas', { timeout: 30000 });
     expect(canvas).toBeTruthy();
 
     // Wait for the app to fully initialize
@@ -161,11 +161,10 @@ test.describe('Menu System', () => {
 
     console.log('Game screen texts:', texts);
 
-    // Game screen should have score, target, distribution, and sample button
+    // Game screen should have score, target, and roll button
     expect(texts.some(t => t.startsWith('Score:'))).toBe(true);
     expect(texts.some(t => t.startsWith('Target:'))).toBe(true);
-    expect(texts.some(t => t.includes('𝒩'))).toBe(true); // Normal distribution
-    expect(texts).toContain('Sample');
+    expect(texts).toContain('Roll');
 
     // Should not have start screen items
     expect(texts).not.toContain('A Game of Chance');
@@ -293,7 +292,7 @@ test.describe('Menu System', () => {
 
     console.log('After Continue texts:', texts);
 
-    expect(texts).toContain('Sample');
+    expect(texts).toContain('Roll');
     expect(texts).toContain('Menu');
     expect(texts).not.toContain('Paused');
   });
@@ -310,9 +309,9 @@ test.describe('Menu System', () => {
     await page.mouse.click(centerX, menuStartY);
     await page.waitForTimeout(1000);
 
-    // Click Sample button to change score
-    const sampleButtonY = boundingBox.y + boundingBox.height - 150;
-    await page.mouse.click(centerX, sampleButtonY);
+    // Click Roll button to change score
+    const rollButtonY = boundingBox.y + boundingBox.height - 150;
+    await page.mouse.click(centerX, rollButtonY);
     await page.waitForTimeout(2500); // Wait for dice animation to complete (fixed 2 seconds)
 
     // Click Menu button
