@@ -33,6 +33,10 @@ module Lib
     , generateDiceSpritesheet
     , getAnimationFrames
     , newAnimatedSpriteFromJSArray
+      -- * Viewport/Window
+    , getWindowWidth
+    , getWindowHeight
+    , onWindowResize
     ) where
 
 import GHC.Wasm.Prim
@@ -934,3 +938,26 @@ foreign import javascript unsafe
 -- This bypasses the Haskell list conversion issue.
 foreign import javascript unsafe "new PIXI.AnimatedSprite($1)"
     newAnimatedSpriteFromJSArray :: JSVal -> IO JSVal
+
+-- *****************************************************************************
+-- * Viewport/Window Management
+-- *****************************************************************************
+
+-- | Get the current window inner width
+foreign import javascript unsafe "window.innerWidth"
+    getWindowWidth :: IO Int
+
+-- | Get the current window inner height
+foreign import javascript unsafe "window.innerHeight"
+    getWindowHeight :: IO Int
+
+-- | Register a callback for window resize events.
+foreign import javascript safe
+  """
+  (() => {
+    window.addEventListener('resize', () => {
+      $1();
+    });
+  })()
+  """
+    onWindowResize :: JSVal -> IO ()

@@ -80,7 +80,8 @@ executable agoc
         microlens-aeson,
         bytestring,
         ghc-experimental,
-        random
+        random,
+        array
     -- Directories containing source files.
     hs-source-dirs:   app
 

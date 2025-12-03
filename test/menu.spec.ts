@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { selectDiceAndRoll } from './test-helpers';
 
 test.describe('Menu System', () => {
   test.beforeEach(async ({ page }) => {
@@ -311,12 +312,42 @@ test.describe('Menu System', () => {
 
     // Navigate to game screen
     await page.mouse.click(centerX, menuStartY);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000); // Wait for game screen and hand to render
 
-    // Click Roll button to change score
-    const rollButtonY = boundingBox.y + boundingBox.height - 150;
-    await page.mouse.click(centerX, rollButtonY);
-    await page.waitForTimeout(2500); // Wait for dice animation to complete (fixed 2 seconds)
+    // Select 1 die and roll to change score - use 1 to minimize chance of completing blind
+    await selectDiceAndRoll(page, boundingBox, 1);
+
+    // If we completed the blind, click Continue to dismiss the dialog first
+    const blindComplete = await page.evaluate(() => {
+      const app = (window as any).__PIXI_APP__;
+      if (!app?.stage?.children) return false;
+      const findDialogText = (container: any): boolean => {
+        if (container.text && container.text.includes('Blind Complete')) return true;
+        if (container.children) {
+          for (const child of container.children) {
+            if (findDialogText(child)) return true;
+          }
+        }
+        return false;
+      };
+      return findDialogText(app.stage);
+    });
+
+    if (blindComplete) {
+      // Die reward screen shows after blind complete - click Skip button
+      // Skip button: skipY = 280 + 100 + 40 = 420, center = 440
+      // Relative to screen center (360): 440 - 360 = 80
+      const skipButtonY = boundingBox.y + boundingBox.height / 2 + 80;
+      await page.mouse.click(centerX, skipButtonY);
+      await page.waitForTimeout(500);
+
+      // Now we're in the shop - click Next Blind to get back to game
+      // Button Y = panelY + panelH - 50 = 185 + 350 - 50 = 485, center = 505
+      // Relative to center: 505 - 360 = 145
+      const nextBlindButtonY = boundingBox.y + boundingBox.height / 2 + 145;
+      await page.mouse.click(centerX, nextBlindButtonY);
+      await page.waitForTimeout(1000);
+    }
 
     // Click Menu button
     const menuButtonY = boundingBox.y + boundingBox.height - 80;
