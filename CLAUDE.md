@@ -6,7 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AGOC (A Game of Chance) is a dice game written in Haskell and compiled to WebAssembly using the GHC WASM backend. It uses PIXI.js for 2D rendering and Three.js for 3D dice rendering, with optional Electron packaging for desktop builds.
 
-## Build Commands
+## Quick Agent Workflow
+
+1) Enter the nix dev shell for the wasm toolchain and Playwright deps (first entry installs them):  
+`nix develop`  (flake; comes with wasm32-wasi-{ghc,cabal}, node, python).  
+2) Build the WASM + JS FFI and copy to `public/`:  
+`./locally.sh` (preferred) or `./build-and-copy.sh` (Docker fallback).  
+4) Run Playwright tests:  
+`npx playwright test` (needs `public/agoc.wasm` present; nix shell installs @playwright/test and chromium).  
+5) Package Electron (if needed):  
+`./build-electron.sh` (uses Docker, writes to `dist/`).
+
+## Build Commands (details)
 
 ### Local Build (Preferred)
 ```bash
@@ -23,6 +34,11 @@ nix develop            # Enter nix shell with wasm32-wasi toolchain
 ```bash
 ./build-electron.sh    # Build Electron packages for Linux/Windows (uses Docker)
 ```
+
+### Dependencies and Environment
+- Nix flake (`flake.nix`) provides ghc-wasm-meta, Node.js, and Python. The shellHook auto-installs `@playwright/test` and downloads Chromium on first entry.
+- Without Nix: Use Docker. 
+- Vendoring CDN deps for offline use: `./scripts/vendor-dependencies.sh` populates `public/vendor/…`.
 
 ## Architecture
 
@@ -46,6 +62,11 @@ nix develop            # Enter nix shell with wasm32-wasi toolchain
 - Main function exported via `foreign export javascript "main"`
 - JavaScript FFI via `foreign import javascript` syntax
 - Requires post-link.mjs to generate JS FFI glue code from WASM binary
+
+### Testing
+- End-to-end tests live in `test/` and run via Playwright (`playwright.config.ts` serves `public/` on :8000).
+- Ensure `public/agoc.wasm` + `public/ghc_wasm_jsffi.js` exist before running `npx playwright test`.
+- pixijs-ffi bindings are exercised through the same runtime; keep JS-visible names stable when changing FFI exports.
 
 ## pixijs-ffi Package
 
@@ -189,7 +210,12 @@ Slot-based texture atlas system for concurrent dice animations:
 - `localStorageGet` / `localStorageSet` - Browser storage
 - `histogram_plot` - D3.js histogram rendering (for debugging)
 
-## FFI Patterns
+## FFI Patterns and Conventions
+
+- Add a `js_*` raw import that speaks `JSVal`, then wrap it in a typed function using the relevant `Is…` constraint to maintain the inheritance model.
+- Use `unsafe` for synchronous property/method calls; use `safe` for anything that awaits promises, allocates callbacks, or otherwise yields (see `initApp`).
+- Keep newtypes aligned with Pixi inheritance (`Container` -> `Sprite` -> `AnimatedSprite`, etc.) and prefer `safeCast`/`unsafeCast` from `Graphics.PixiJS.Types` when bridging types.
+- When adding bindings that return arrays/objects, expose a typed wrapper that converts to/from JS arrays rather than leaking raw `JSVal` where possible.
 
 ### JavaScript FFI Syntax
 ```haskell
