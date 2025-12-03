@@ -162,6 +162,13 @@ initialGameState = GameState {
     gs_round = 1
 }
 
+-- | FPS settings for power management
+idleFPS :: Float
+idleFPS = 2.0  -- Low FPS when nothing is animating
+
+activeFPS :: Float
+activeFPS = 60.0  -- Full FPS during animations
+
 -- | Calculate final score from dice results
 -- X = sum of additive dice values
 -- Y = sum of multiplicative dice values (defaults to 1 if none)
@@ -339,6 +346,9 @@ rollAllDice spritesheetCtx app container screenW screenH
     case gs_rollState gs of
         Just _ -> return ()  -- Roll already in progress
         Nothing -> do
+            -- Boost FPS for animations
+            appTicker <- getTicker app
+            setMaxFPS appTicker activeFPS
             -- Clear previous roll's sprites
             forM_ (gs_persistentSprites gs) $ \spriteVal -> do
                 let sprite = fromJSVal spriteVal :: Sprite
@@ -439,7 +449,7 @@ onAllDiceComplete gameStateRef scoreText targetText diceCountText xyText
         else do
             -- No combos, finalize with all results
             finalizeRoll gameStateRef scoreText targetText diceCountText xyText
-                        container screenW screenH (newResults ++ prevResults)
+                        container screenW screenH app (newResults ++ prevResults)
 
 -- | Roll bonus dice from combos
 rollBonusDice :: JSVal -> Application -> Container -> Int -> Int
@@ -547,11 +557,11 @@ highlightDie spriteVal = do
 
 -- | Finalize roll: calculate score, check target, update display
 finalizeRoll :: IORef GameState -> Text -> Text -> Text -> Text
-             -> Container -> Int -> Int
+             -> Container -> Int -> Int -> Application
              -> [DieResult]
              -> IO ()
 finalizeRoll gameStateRef scoreText targetText diceCountText xyText
-             container screenW screenH results = do
+             container screenW screenH app results = do
     gs <- readIORef gameStateRef
 
     let rollScore = calculateScore results
@@ -565,6 +575,10 @@ finalizeRoll gameStateRef scoreText targetText diceCountText xyText
 
     -- Update score display
     setText scoreText (toJSString $ "Score: " ++ show newScore)
+
+    -- Restore idle FPS now that animations are done
+    appTicker <- getTicker app
+    setMaxFPS appTicker idleFPS
 
     -- Check if target reached
     when (newScore >= gs_target gs) $
@@ -887,6 +901,10 @@ main = do
     screen <- getScreen app
     screen_width <- round <$> getRectWidth screen
     screen_height <- round <$> getRectHeight screen
+
+    -- Set idle FPS to reduce CPU usage when not animating
+    appTicker <- getTicker app
+    setMaxFPS appTicker idleFPS
 
     -- Create screen container that will hold all screen content
     screenContainer <- newContainer

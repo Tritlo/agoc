@@ -95,11 +95,27 @@
 
     // Poll gamepads periodically to ensure they're detected
     // This is especially important for Electron on Windows
-    setInterval(() => {
-      if (navigator.getGamepads) {
-        navigator.getGamepads();
+    // Stop polling when window is unfocused to save CPU
+    let gamepadInterval = null;
+
+    function startGamepadPolling() {
+      if (gamepadInterval) return; // Already polling
+      gamepadInterval = setInterval(() => {
+        if (navigator.getGamepads) navigator.getGamepads();
+      }, 100); // 10/sec when focused
+    }
+
+    function stopGamepadPolling() {
+      if (gamepadInterval) {
+        clearInterval(gamepadInterval);
+        gamepadInterval = null;
       }
-    }, 100);
+    }
+
+    if (document.hasFocus()) startGamepadPolling();
+
+    window.addEventListener('focus', startGamepadPolling);
+    window.addEventListener('blur', stopGamepadPolling);
 
     // Make PIXI available globally for the WASM module
     window.PIXI = PIXI;
