@@ -1,8 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { navigateToGame, selectDiceAndRoll, getScoreText } from './test-helpers';
 
 test.describe('Dice Animation', () => {
-  test('THREE.js is loaded and available globally', async ({ page }) => {
+  test('THREE.js is loaded and available globally', async ({ page }, testInfo) => {
     // Listen for console errors
     const consoleErrors: string[] = [];
     page.on('console', msg => {
@@ -13,9 +13,11 @@ test.describe('Dice Animation', () => {
 
     // Navigate to the app
     await page.goto('/');
+    await page.screenshot({ path: testInfo.outputPath('after-goto.png'), fullPage: true });
 
     // Wait for spritesheet generation and page to load (~2-4 seconds)
     await page.waitForTimeout(5000);
+    await page.screenshot({ path: testInfo.outputPath('after-wait.png'), fullPage: true });
 
     // Check that THREE is defined
     const threeIsDefined = await page.evaluate(() => {
@@ -38,7 +40,7 @@ test.describe('Dice Animation', () => {
     expect(hasRequiredClasses).toBe(true);
   });
 
-  test('selecting dice and rolling shows animation without errors', async ({ page }) => {
+  test('selecting dice and rolling shows animation without errors', async ({ page }, testInfo) => {
     // Listen for console messages
     const consoleErrors: string[] = [];
     const consoleLogs: string[] = [];
@@ -56,7 +58,7 @@ test.describe('Dice Animation', () => {
       pageErrors.push(error.message);
     });
 
-    const { canvas, boundingBox } = await navigateToGame(page);
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     // Select dice and roll
     await selectDiceAndRoll(page, boundingBox, 2);
@@ -84,7 +86,7 @@ test.describe('Dice Animation', () => {
     expect(scoreText).toMatch(/^Score: \d+$/);
   });
 
-  test('clicking roll 256 times rapidly does not break', async ({ page }) => {
+  test('clicking roll 256 times rapidly does not break', async ({ page }, testInfo) => {
     test.setTimeout(30000); // 30 second timeout
     // Listen for page errors
     const pageErrors: string[] = [];
@@ -98,7 +100,7 @@ test.describe('Dice Animation', () => {
       }
     });
 
-    const { canvas, boundingBox } = await navigateToGame(page);
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     const clickX = boundingBox.x + boundingBox.width / 2;
     const clickY = boundingBox.y + boundingBox.height - 150;

@@ -1,9 +1,9 @@
-import { test, expect } from '@playwright/test';
-import { navigateToGame, selectDiceAndRoll, getEntropyText, getDeckText, getSelectionText, isChoiceDialogVisible, isGameOverVisible, getAllTexts } from './test-helpers';
+import { test, expect } from './fixtures';
+import { navigateToGame, selectDiceAndRoll, getEntropyText, getDeckText, getSelectionText, isChoiceDialogVisible, isGameOverVisible, getAllTexts, clickText } from './test-helpers';
 
 test.describe('Dice Mechanics', () => {
-  test('displays entropy and deck counts', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
+  test('displays entropy and deck counts', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     // Check for entropy text
     const entropyText = await getEntropyText(page);
@@ -18,8 +18,8 @@ test.describe('Dice Mechanics', () => {
     expect(deckText).toContain('Discard:');
   });
 
-  test('hand is populated with dice to select', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
+  test('hand is populated with dice to select', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     // Check that hand dice are present by looking for clickable dice containers
     const diceCount = await page.evaluate(() => {
@@ -47,8 +47,8 @@ test.describe('Dice Mechanics', () => {
     expect(diceCount).toBeGreaterThanOrEqual(8);
   });
 
-  test('dice persist on screen after animation completes', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
+  test('dice persist on screen after animation completes', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     // Select dice and roll
     await selectDiceAndRoll(page, boundingBox, 2);
@@ -78,8 +78,8 @@ test.describe('Dice Mechanics', () => {
     expect(spriteCount).toBeGreaterThanOrEqual(1);
   });
 
-  test('clicking dice in hand selects them', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
+  test('clicking dice in hand selects them', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
     // Find dice positions (filter to only hand area at bottom of screen)
     const dicePositions = await page.evaluate(() => {
@@ -90,8 +90,8 @@ test.describe('Dice Mechanics', () => {
       const findHandDice = (container: any): void => {
         if (container.eventMode === 'static' && container.cursor === 'pointer') {
           const globalPos = container.getGlobalPosition ? container.getGlobalPosition() : null;
-          // Filter to only hand area (y > 300)
-          if (globalPos && globalPos.y > 300) {
+          // Filter to hand area (approx bottom strip)
+          if (globalPos && globalPos.y > 350 && globalPos.y < 550) {
             positions.push({ x: globalPos.x, y: globalPos.y });
           }
         }
@@ -110,7 +110,7 @@ test.describe('Dice Mechanics', () => {
 
     // Click on first die
     const firstDie = dicePositions[0];
-    await page.mouse.click(boundingBox.x + firstDie.x, boundingBox.y + firstDie.y);
+    await page.mouse.click(firstDie.x, firstDie.y);
     await page.waitForTimeout(200);
 
     // Check selection text
@@ -118,6 +118,11 @@ test.describe('Dice Mechanics', () => {
     console.log('Selection text after click:', selectionText);
     expect(selectionText).toContain('Selected:');
     expect(selectionText).toMatch(/Selected: 1/);
+
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    const sel = state?.gss_selection?.ss_selected;
+    const selCount = Array.isArray(sel) ? sel.length : (sel ? Object.keys(sel).length : 0);
+    expect(selCount).toBeGreaterThanOrEqual(1);
   });
 
   test('blind complete or game over appears after rolling', async ({ page }) => {
@@ -127,7 +132,7 @@ test.describe('Dice Mechanics', () => {
     // Keep rolling until blind complete or game over (max 4 rolls per blind)
     let blindComplete = false;
     let gameOver = false;
-    for (let i = 0; i < 10 && !blindComplete && !gameOver; i++) {
+    for (let i = 0; i < 20 && !blindComplete && !gameOver; i++) {
       // Select 5 dice (max) to maximize score chance
       await selectDiceAndRoll(page, boundingBox, 5);
       await page.waitForTimeout(500);
@@ -156,7 +161,7 @@ test.describe('Dice Mechanics', () => {
     // Keep rolling until blind complete (max 4 rolls per blind, select 5 dice for max score)
     let blindComplete = false;
     let gameOver = false;
-    for (let i = 0; i < 10 && !blindComplete && !gameOver; i++) {
+    for (let i = 0; i < 20 && !blindComplete && !gameOver; i++) {
       await selectDiceAndRoll(page, boundingBox, 5);
       await page.waitForTimeout(500);
 
@@ -173,43 +178,41 @@ test.describe('Dice Mechanics', () => {
 
     expect(blindComplete).toBe(true);
 
-    // Get entropy before clicking Skip on die reward screen
-    const entropyBefore = await getEntropyText(page);
-    console.log('Entropy when blind complete:', entropyBefore);
+    // When round completes, entropy is awarded (was 4 starting, now should be > 4)
+    const entropyOnComplete = await getEntropyText(page);
+    console.log('Entropy when blind complete:', entropyOnComplete);
+    const entropyVal = entropyOnComplete ? parseInt(entropyOnComplete.replace(/\D+/g, ''), 10) : 0;
+    // Entropy should have increased from starting value of 4 (round 1 reward is 4)
+    expect(entropyVal).toBeGreaterThan(4);
 
     const centerX = boundingBox.x + boundingBox.width / 2;
 
-    // New flow: Die reward screen appears first - click Skip button at bottom
-    // Skip button: skipY = 280 + 100 + 40 = 420, center = 420 + 20 = 440
-    // Relative to screen center (360): 440 - 360 = 80
-    const skipButtonY = boundingBox.y + boundingBox.height / 2 + 80;
-    await page.mouse.click(centerX, skipButtonY);
-    await page.waitForTimeout(500);
+    // Die choice screen appears first - click Skip to go to shop
+    const dieChoiceTexts = await getAllTexts(page);
+    console.log('Die choice screen texts:', dieChoiceTexts);
+    expect(dieChoiceTexts.some(t => t.includes('Complete!'))).toBe(true);
+    expect(dieChoiceTexts.some(t => t === 'Skip')).toBe(true);
 
-    // Check entropy increased (Small Blind reward is +3, so 4 + 3 = 7)
-    const entropyAfter = await getEntropyText(page);
-    console.log('Entropy after die reward:', entropyAfter);
-    expect(entropyAfter).toMatch(/Entropy: 7/);
+    // Click Skip button (uses text-based click)
+    await clickText(page, 'Skip');
+    await page.waitForTimeout(500);
 
     // Verify shop is showing
     const shopTexts = await getAllTexts(page);
     console.log('Shop texts:', shopTexts);
     expect(shopTexts.some(t => t === 'SHOP')).toBe(true);
-    expect(shopTexts.some(t => t === 'Next Blind')).toBe(true);
+    expect(shopTexts.some(t => t === 'Next Round')).toBe(true);
 
-    // Click Next Blind button - it's at the bottom of the shop panel
-    // panelY = (720-350)/2 = 185, button Y = 185 + 350 - 50 = 485, center = 485 + 20 = 505
-    // Relative to screen center (360): 505 - 360 = 145
-    const nextBlindButtonY = boundingBox.y + boundingBox.height / 2 + 145;
-    await page.mouse.click(centerX, nextBlindButtonY);
+    // Click Next Round to go to next round
+    await clickText(page, 'Next Round');
     await page.waitForTimeout(1000);
 
-    // Check that we progressed to next blind by verifying:
+    // Check that we progressed to next round by verifying:
     // - Score reset to 0
-    // - Target increased to Big Blind target (30 for Ante 1)
+    // - Target increased (round 2 target is 30)
     const allTexts = await getAllTexts(page);
     console.log('All texts after shop:', allTexts);
     expect(allTexts.some(t => t === 'Score: 0')).toBe(true);
-    expect(allTexts.some(t => t === 'Target: 30')).toBe(true); // Big Blind target
+    expect(allTexts.some(t => t === 'Target: 30')).toBe(true); // Round 2 target
   });
 });

@@ -1,18 +1,96 @@
-import { Page } from '@playwright/test';
+import { Page, TestInfo } from '@playwright/test';
+
+async function snap(page: Page, testInfo: TestInfo | undefined, label: string) {
+  if (!testInfo) return;
+  const file = testInfo.outputPath(`${Date.now()}-${label}.png`);
+  await page.screenshot({ path: file, fullPage: true });
+}
+
+async function getTextPosition(page: Page, text: string): Promise<{x: number; y: number}> {
+  const pos = await page.evaluate((targetText) => {
+    const app = (window as any).__PIXI_APP__;
+    if (!app?.stage?.children) return null;
+
+    let found: {x: number; y: number} | null = null;
+    const visit = (node: any) => {
+      if (found) return;
+      if (node.text === targetText && typeof node.getGlobalPosition === 'function') {
+        const gp = node.getGlobalPosition();
+        found = { x: gp.x, y: gp.y };
+        return;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          visit(child);
+          if (found) return;
+        }
+      }
+    };
+    visit(app.stage);
+    return found;
+  }, text);
+
+  if (!pos) throw new Error(`Text "${text}" not found on stage`);
+  return pos;
+}
+
+export async function clickText(page: Page, text: string, testInfo?: TestInfo, label?: string) {
+  await snap(page, testInfo, `before-click-${label ?? text}`);
+  const pos = await getTextPosition(page, text);
+  await page.mouse.click(pos.x, pos.y);
+  await snap(page, testInfo, `after-click-${label ?? text}`);
+}
+
+export async function waitForText(page: Page, text: string, timeout = 3000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      await getTextPosition(page, text);
+      return;
+    } catch (_) {
+      await page.waitForTimeout(100);
+    }
+  }
+  throw new Error(`Text "${text}" not found within ${timeout}ms`);
+}
+
+export async function waitForSelectorWithShot(
+  page: Page,
+  selector: string,
+  timeout: number,
+  label: string,
+  testInfo?: TestInfo
+) {
+  await snap(page, testInfo, `${label}-before`);
+  const handle = await page.waitForSelector(selector, { timeout });
+  await snap(page, testInfo, `${label}-after`);
+  return handle;
+}
+
+export async function waitForTimeoutWithShot(
+  page: Page,
+  ms: number,
+  label: string,
+  testInfo?: TestInfo
+) {
+  await snap(page, testInfo, `${label}-before`);
+  await page.waitForTimeout(ms);
+  await snap(page, testInfo, `${label}-after`);
+}
 
 // Helper to navigate to game screen
-export async function navigateToGame(page: Page) {
+export async function navigateToGame(page: Page, testInfo?: TestInfo) {
   await page.goto('/');
-  const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
-  await page.waitForTimeout(5000); // Wait for spritesheet
+  await snap(page, testInfo, 'after-goto');
+  const canvas = await waitForSelectorWithShot(page, 'canvas', 8000, 'wait-canvas', testInfo);
+  await waitForTimeoutWithShot(page, 5000, 'wait-spritesheet', testInfo);
+
+  // Click "Start Game" via text lookup
+  await clickText(page, 'Start Game', testInfo, 'start-game');
+  await waitForTimeoutWithShot(page, 2000, 'wait-post-start', testInfo); // Wait for game screen and hand to render
 
   const boundingBox = await canvas!.boundingBox();
   if (!boundingBox) throw new Error('Canvas has no bounding box');
-
-  const centerX = boundingBox.x + boundingBox.width / 2;
-  const menuY = boundingBox.y + boundingBox.height / 2;
-  await page.mouse.click(centerX, menuY);
-  await page.waitForTimeout(2000); // Wait for game screen and hand to render
 
   return { canvas, boundingBox };
 }
@@ -58,7 +136,8 @@ export async function selectDiceAndRoll(page: Page, boundingBox: { x: number, y:
   const diceToSelect = Math.min(numDice, dicePositions.length);
   for (let i = 0; i < diceToSelect; i++) {
     const pos = dicePositions[i];
-    await page.mouse.click(boundingBox.x + pos.x, boundingBox.y + pos.y);
+    // positions are global; click directly
+    await page.mouse.click(pos.x, pos.y);
     await page.waitForTimeout(100);
   }
 

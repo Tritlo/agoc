@@ -37,10 +37,17 @@ module Lib
     , getWindowWidth
     , getWindowHeight
     , onWindowResize
+      -- * Game state persistence
+    , getState
+    , setState
     ) where
 
 import GHC.Wasm.Prim
+import Graphics.PixiJS (fromJSString, toJSString)
 import Graphics.PixiJS.Interop () -- For IsString JSString instance
+import Game.State (GameSnapshot)
+import Data.Aeson (decode, encode)
+import qualified Data.ByteString.Lazy.Char8 as LBS8
 
 -- *****************************************************************************
 -- * Sound Effects
@@ -961,3 +968,26 @@ foreign import javascript safe
   })()
   """
     onWindowResize :: JSVal -> IO ()
+
+-- *****************************************************************************
+-- * Global Game State (window.GAMESTATE)
+-- *****************************************************************************
+
+foreign import javascript unsafe "window.GAMESTATE = JSON.parse($1);"
+    js_setState :: JSString -> IO ()
+
+foreign import javascript unsafe "return window.GAMESTATE ? JSON.stringify(window.GAMESTATE) : \"\";"
+    js_getState :: IO JSString
+
+-- | Persist the current snapshot into `window.GAMESTATE`.
+setState :: GameSnapshot -> IO ()
+setState snap = js_setState $ toJSString (LBS8.unpack (encode snap))
+
+-- | Read the snapshot from `window.GAMESTATE`.
+getState :: IO (Maybe GameSnapshot)
+getState = do
+    raw <- js_getState
+    let txt = fromJSString raw
+    if null txt
+        then pure Nothing
+        else pure (decode (LBS8.pack txt))

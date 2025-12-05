@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { navigateToGame, selectDiceAndRoll, isChoiceDialogVisible, getJokerCount } from './test-helpers';
 
 test.describe('Design Screenshots', () => {

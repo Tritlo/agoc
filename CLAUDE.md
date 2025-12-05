@@ -13,7 +13,7 @@ AGOC (A Game of Chance) is a dice game written in Haskell and compiled to WebAss
 2) Build the WASM + JS FFI and copy to `public/`:  
 `./locally.sh` (preferred) or `./build-and-copy.sh` (Docker fallback).  
 4) Run Playwright tests:  
-`npx playwright test` (needs `public/agoc.wasm` present; nix shell installs @playwright/test and chromium).  
+`nix develop -c npx playwright test` (ensure `public/agoc.wasm` present; nix shell installs @playwright/test and chromium).  
 5) Package Electron (if needed):  
 `./build-electron.sh` (uses Docker, writes to `dist/`).
 

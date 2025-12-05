@@ -5,9 +5,11 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
-import Lib (blipWithFreq, playDiceRollSound, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray, getWindowWidth, getWindowHeight, onWindowResize)
+import Lib (blipWithFreq, playDiceRollSound, closeWindow, generateDiceSpritesheet, getAnimationFrames, newAnimatedSpriteFromJSArray, getWindowWidth, getWindowHeight, onWindowResize, getState, setState)
+import Game.State
+import Game.Logic
 import Graphics.PixiJS
-import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef, IORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef, newIORef, readIORef, writeIORef)
 import Control.Monad (when, forM_, forM, void)
 import System.Random (randomRIO)
 import Data.List (groupBy, sortBy)
@@ -100,16 +102,6 @@ renderMenu menu = do
 -- * Screen Management
 -- *****************************************************************************
 
--- | Different screens in the game
-data Screen = StartScreen | OptionsScreen | GameScreen
-    deriving (Eq, Show)
-
--- | Global app state for screen management
-data AppState = AppState {
-    app_currentScreen :: Screen,
-    app_screenContainer :: Container  -- The container holding current screen contents
-}
-
 -- | Clear the current screen container
 clearScreen :: Container -> IO ()
 clearScreen container = do
@@ -187,126 +179,21 @@ renderButton container button = do
     void $ addChild container btnContainer
     return ()
 
--- | Type of die: additive contributes to X, multiplicative to Y in X*Y scoring
-data DiceType = Additive | Multiplicative
-    deriving (Show, Eq, Ord)
-
 -- *****************************************************************************
--- * Deckbuilding Types
+-- * State Helpers
 -- *****************************************************************************
 
--- | Unique identifier for each die in the game
-newtype DieId = DieId Int
-    deriving (Eq, Ord, Show)
+-- | Apply a pure action, update the runtime reference, and persist a snapshot.
+applyActionAndStore :: IORef GameState -> GameAction -> IO GameState
+applyActionAndStore ref action = do
+    newState <- atomicModifyIORef' ref (\gs -> let gs' = applyAction action gs in (gs', gs'))
+    setState (toSnapshot newState)
+    pure newState
 
--- | A die with unique identity and type
-data Die = Die {
-    die_id   :: DieId,
-    die_type :: DiceType
-} deriving (Eq, Show)
+-- | Persist the current state snapshot to `window.GAMESTATE`.
+persistSnapshot :: IORef GameState -> IO ()
+persistSnapshot ref = readIORef ref >>= setState . toSnapshot
 
--- | The three zones where dice can exist (bag, hand, discard)
-data DeckZones = DeckZones {
-    dz_bag     :: [Die],      -- Undrawn dice (shuffled)
-    dz_hand    :: [Die],      -- Currently drawn dice
-    dz_discard :: [Die]       -- Used/discarded dice
-} deriving (Show)
-
--- | Selection state tracking which dice are selected for throwing
-data SelectionState = SelectionState {
-    ss_selected     :: Set.Set DieId,  -- IDs of selected dice
-    ss_maxSelectable :: Int            -- Max dice that can be selected (fixed at 5)
-} deriving (Show)
-
--- | Game phases in a round
-data GamePhase
-    = DrawPhase         -- Drawing dice from bag
-    | SelectionPhase    -- Selecting dice to throw
-    | RollingPhase      -- Dice are being animated
-    | ResolutionPhase   -- Score is being calculated
-    | ChoicePhase       -- Player choosing new die after reaching target (legacy)
-    | ShopPhase         -- Shopping between rounds
-    deriving (Eq, Show)
-
--- | Shop contents - what's available for purchase this visit (jokers only)
-data ShopContents = ShopContents {
-    shop_joker      :: Maybe Joker,  -- First joker slot (Nothing if sold)
-    shop_jokerCost  :: Int,          -- Cost of first joker (4-8)
-    shop_joker2     :: Maybe Joker,  -- Second joker slot (Nothing if sold)
-    shop_joker2Cost :: Int,          -- Cost of second joker (4-8)
-    shop_rerollCost :: Int           -- Cost to reroll shop (always 2)
-} deriving (Show)
-
--- | Result of a single die roll, tracking type and value
-data DieResult = DieResult {
-    dr_type   :: DiceType,
-    dr_value  :: Int,
-    dr_sprite :: JSVal
-}
-
--- *****************************************************************************
--- * Joker System
--- *****************************************************************************
-
--- | Joker effects that modify scoring
-data JokerEffect
-    = AddToX Int                    -- ^ Flat +N to X
-    | AddToY Int                    -- ^ Flat +N to Y
-    | ScaleY Float                  -- ^ Multiply Y by factor
-    | PerDieBonus DiceType Int      -- ^ +N to X per mult die, or +N to Y per add die
-    | OnValueBonus Int Int          -- ^ +N to X for each die showing value V
-    | ComboBonus Int                -- ^ +N to Y per combo triggered
-    deriving (Eq, Show)
-
--- | A joker with name, description, and effect
-data Joker = Joker {
-    joker_id          :: Int,
-    joker_name        :: String,
-    joker_description :: String,
-    joker_effect      :: JokerEffect,
-    joker_cost        :: Int
-} deriving (Eq, Show)
-
--- | All available jokers in the game
-allJokers :: [Joker]
-allJokers =
-    [ Joker 1 "Blue Chip" "+5 to X on every roll" (AddToX 5) 5
-    , Joker 2 "Red Storm" "+1 to Y for each mult die rolled" (PerDieBonus Multiplicative 1) 6
-    , Joker 3 "Twin Engines" "+3 to Y for each combo triggered" (ComboBonus 3) 7
-    , Joker 4 "Mean Green" "+2 to X for each 1 rolled" (OnValueBonus 1 2) 5
-    , Joker 5 "Lucky Seven" "+4 to X for each 6 rolled" (OnValueBonus 6 4) 6
-    , Joker 6 "Steady Hand" "+3 to Y on every roll" (AddToY 3) 6
-    , Joker 7 "Multiplier" "x1.5 to final Y" (ScaleY 1.5) 8
-    , Joker 8 "Green Machine" "+1 to Y for each add die rolled" (PerDieBonus Additive 1) 6
-    ]
-
--- | Apply a single joker effect to the current X and Y values
-applyJokerEffect :: [DieResult] -> Int -> JokerEffect -> (Int, Int) -> (Int, Int)
-applyJokerEffect results comboCount effect (x, y) = case effect of
-    AddToX n -> (x + n, y)
-    AddToY n -> (x, y + n)
-    ScaleY f -> (x, round (fromIntegral y * f))
-    OnValueBonus targetVal bonus ->
-        let count = length [r | r <- results, dr_value r == targetVal]
-        in (x + count * bonus, y)
-    ComboBonus n -> (x, y + comboCount * n)
-    PerDieBonus dtype n ->
-        let count = length [r | r <- results, dr_type r == dtype]
-        in case dtype of
-            -- Mult dice bonus adds to X (cross-type synergy)
-            Multiplicative -> (x + count * n, y)
-            -- Add dice bonus adds to Y (cross-type synergy)
-            Additive -> (x, y + count * n)
-
--- | Apply all joker effects to calculate final score
-calculateScoreWithJokers :: [Joker] -> [DieResult] -> Int -> (Int, Int, Int)
-calculateScoreWithJokers jokers results comboCount =
-    let baseX = sum [dr_value r | r <- results, dr_type r == Additive]
-        baseY = sum [dr_value r | r <- results, dr_type r == Multiplicative]
-        (modX, modY) = foldl (flip $ applyJokerEffect results comboCount . joker_effect)
-                             (baseX, baseY) jokers
-        finalY = if modY == 0 then 1 else modY
-    in (modX, finalY, modX * finalY)
 
 -- *****************************************************************************
 -- * Shop System
@@ -348,103 +235,6 @@ generateShop ownedJokers _nextDieId = do
     }
 
 -- *****************************************************************************
--- * Round System
--- *****************************************************************************
-
--- | Current round state (simplified from Blind/Ante system)
-data RoundInfo = RoundInfo {
-    round_number :: Int,       -- Which round (1, 2, 3, ...)
-    round_target :: Int,       -- Score needed to beat this round
-    round_reward :: Int        -- Currency reward for beating
-} deriving (Eq, Show)
-
--- | Generate round with appropriate target
-generateRound :: Int -> RoundInfo
-generateRound roundNum = RoundInfo
-    { round_number = roundNum
-    , round_target = 15 + (roundNum - 1) * 15  -- 15, 30, 45, 60, ...
-    , round_reward = 3 + roundNum              -- 4, 5, 6, 7, ...
-    }
-
--- | Rolls allowed per round (always 4)
-rollsPerRound :: Int
-rollsPerRound = 4
-
--- | Current roll state for tracking dice during animation
-data RollState = RollState {
-    rs_pending     :: Int,          -- Number of dice still animating
-    rs_newResults  :: [DieResult],  -- Results from current batch (for combo detection)
-    rs_prevResults :: [DieResult],  -- Results from previous batches (not checked for combos)
-    rs_isComboRoll :: Bool,         -- Whether this is a combo bonus roll
-    rs_comboCount  :: Int           -- Total combos triggered this roll (for joker effects)
-}
-
--- | Main game state
-data GameState = GameState {
-    gs_score              :: Int,       -- Current accumulated score
-    gs_target             :: Int,       -- Target to reach (from current round)
-    gs_persistentSprites  :: [JSVal],   -- Sprites from last roll (to clear on next roll)
-    gs_rollState          :: Maybe RollState,  -- Active roll tracking (Nothing when idle)
-    gs_round              :: Int,       -- Current round number
-    -- Deckbuilding fields
-    gs_entropy            :: Int,              -- Currency (earned from rounds, spent in shop)
-    gs_deckZones          :: DeckZones,        -- Bag, hand, discard piles
-    gs_selection          :: SelectionState,   -- Which dice are selected
-    gs_phase              :: GamePhase,        -- Current game phase
-    gs_nextDieId          :: Int,              -- Counter for unique die IDs
-    gs_handSprites        :: [(DieId, JSVal)], -- Sprites for dice in hand
-    gs_handContainer      :: Maybe Container,  -- Container for hand display
-    -- Joker system
-    gs_jokers             :: [Joker],          -- Active jokers (max 5)
-    gs_jokerContainer     :: Maybe Container,  -- Container for joker slots UI
-    -- Round system
-    gs_roundInfo          :: RoundInfo,        -- Current round info
-    gs_rollsRemaining     :: Int,              -- Rolls left this round
-    -- Shop system
-    gs_shopContents       :: Maybe ShopContents -- Current shop offerings (Nothing when not in shop)
-}
-
--- | Create initial deck with 6 additive and 6 multiplicative dice
-initialDeckZones :: (DeckZones, Int)
-initialDeckZones =
-    let additiveDice = [Die (DieId i) Additive | i <- [0..5]]
-        multiDice = [Die (DieId i) Multiplicative | i <- [6..11]]
-        allDice = additiveDice ++ multiDice
-    in (DeckZones { dz_bag = allDice, dz_hand = [], dz_discard = [] }, 12)
-
--- | Initial jokers for testing (Blue Chip + Twin Engines)
-initialJokers :: [Joker]
-initialJokers =
-    [ allJokers !! 0  -- Blue Chip: +5 to X
-    , allJokers !! 2  -- Twin Engines: +3 to Y per combo
-    ]
-
--- | Initial game state
-initialGameState :: GameState
-initialGameState =
-    let (zones, nextId) = initialDeckZones
-        startingRound = generateRound 1
-    in GameState {
-        gs_score = 0,
-        gs_target = round_target startingRound,
-        gs_persistentSprites = [],
-        gs_rollState = Nothing,
-        gs_round = 1,
-        gs_entropy = 4,  -- Starting currency
-        gs_deckZones = zones,
-        gs_selection = SelectionState Set.empty maxSelection,
-        gs_phase = DrawPhase,
-        gs_nextDieId = nextId,
-        gs_handSprites = [],
-        gs_handContainer = Nothing,
-        gs_jokers = initialJokers,
-        gs_jokerContainer = Nothing,
-        gs_roundInfo = startingRound,
-        gs_rollsRemaining = rollsPerRound,
-        gs_shopContents = Nothing
-    }
-
--- *****************************************************************************
 -- * Deckbuilding Core Mechanics
 -- *****************************************************************************
 
@@ -463,17 +253,6 @@ shuffleList xs = do
         let a = arr' ! i
             b = arr' ! j
         in arr' // [(i, b), (j, a)]
-
--- | Fixed hand size and selection limit (Balatro-style: draw 8, select 5)
-handSize :: Int
-handSize = 8
-
-maxSelection :: Int
-maxSelection = 5
-
--- | Calculate draw count (now fixed)
-drawCount :: Int -> Int
-drawCount _ = handSize
 
 -- | Draw dice from bag to hand
 -- If bag empties mid-draw, shuffle discard into bag and continue
@@ -517,15 +296,13 @@ toggleDieSelection dieId gsRef = do
 
     if currentlySelected
         then do
-            -- Deselect
-            let newSel = sel { ss_selected = Set.delete dieId (ss_selected sel) }
-            writeIORef gsRef gs { gs_selection = newSel }
+            -- Deselect via action
+            _ <- applyActionAndStore gsRef (DeselectDie dieId)
             return False  -- Now deselected
         else if canSelectMore sel
             then do
                 -- Select if under limit
-                let newSel = sel { ss_selected = Set.insert dieId (ss_selected sel) }
-                writeIORef gsRef gs { gs_selection = newSel }
+                _ <- applyActionAndStore gsRef (SelectDie dieId)
                 return True  -- Now selected
             else return False  -- Can't select more
 
@@ -1052,6 +829,7 @@ finalizeRoll gameStateRef scoreText targetText entropyText deckText selectionTex
     -- Update displays
     setText scoreText (toJSString $ "Score: " ++ show newScore)
     updateDeckZonesDisplay deckText newZones
+    persistSnapshot gameStateRef
 
     -- Restore idle FPS now that animations are done
     appTicker <- getTicker app
@@ -1093,12 +871,16 @@ startNewRound spritesheetCtx container screenW screenH
     -- Reset selection (fixed at maxSelection)
     let newSelection = SelectionState Set.empty maxSelection
 
+    let nextRound =
+          if gs_phase gs == ResolutionPhase then gs_round gs + 1 else gs_round gs
+
     writeIORef gsRef gs {
         gs_deckZones = newZones,
         gs_selection = newSelection,
         gs_phase = SelectionPhase,
-        gs_round = gs_round gs + 1
+        gs_round = nextRound
     }
+    persistSnapshot gsRef
 
     -- Update displays
     updateEntropyDisplay entropyText (gs_entropy gs)
@@ -2453,6 +2235,11 @@ main = do
 
     -- Initialize game state
     game_state_ref <- newIORef initialGameState
+    storedState <- getState
+    case storedState of
+        Just snap -> writeIORef game_state_ref (applySnapshot snap initialGameState)
+        Nothing -> return ()
+    persistSnapshot game_state_ref
 
     -- Define screen transition functions using mutual recursion via IORefs
     showStartScreenRef <- newIORef (return () :: IO ())
@@ -2476,27 +2263,41 @@ main = do
             action <- readIORef showPauseMenuRef
             action
 
-    -- Reset game state and go to start screen
+    let renderGame = renderGameScreen spritesheetCtx app screenContainer screen_width screen_height game_state_ref
+            showPauseMenu
+
+    let startGame = do
+            _ <- applyActionAndStore game_state_ref StartGame
+            renderGame
+
+    let resumeGame = do
+            _ <- applyActionAndStore game_state_ref ResumeGame
+            renderGame
+
     let quitToStart = do
-            writeIORef game_state_ref initialGameState
+            _ <- applyActionAndStore game_state_ref QuitToStart
             showStartScreen
 
     -- Set up the actual screen rendering functions
     writeIORef showStartScreenRef $
-        renderStartScreen app screenContainer screen_width screen_height
-            showGameScreen showOptionsScreen
+        do
+            _ <- applyActionAndStore game_state_ref (SetScreen StartScreen)
+            renderStartScreen app screenContainer screen_width screen_height
+                startGame showOptionsScreen
 
     writeIORef showOptionsScreenRef $
-        renderOptionsScreen app screenContainer screen_width screen_height
-            showStartScreen
+        do
+            _ <- applyActionAndStore game_state_ref (SetScreen OptionsScreen)
+            renderOptionsScreen app screenContainer screen_width screen_height
+                showStartScreen
 
-    writeIORef showGameScreenRef $
-        renderGameScreen spritesheetCtx app screenContainer screen_width screen_height game_state_ref
-            showPauseMenu
+    writeIORef showGameScreenRef resumeGame
 
     writeIORef showPauseMenuRef $
-        renderPauseMenu app screenContainer screen_width screen_height
-            showGameScreen quitToStart
+        do
+            _ <- applyActionAndStore game_state_ref PauseGame
+            renderPauseMenu app screenContainer screen_width screen_height
+                resumeGame quitToStart
 
     -- Transition from loading to start screen
     showStartScreen
