@@ -1,20 +1,24 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
+import { selectDiceAndRoll, clickText, waitForText } from './test-helpers';
 
 test.describe('Menu System', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
     // Navigate to the app
     await page.goto('/');
+    await page.screenshot({ path: testInfo.outputPath('after-goto.png'), fullPage: true });
 
     // Wait for WASM to initialize (canvas should be added to the page)
     const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
     expect(canvas).toBeTruthy();
+    await page.screenshot({ path: testInfo.outputPath('after-canvas.png'), fullPage: true });
 
     // Wait for spritesheet generation (loading screen) and app to fully initialize
     // Spritesheet generation takes ~2-4 seconds
     await page.waitForTimeout(5000);
+    await page.screenshot({ path: testInfo.outputPath('after-wait.png'), fullPage: true });
   });
 
-  test('start screen displays menu items', async ({ page }) => {
+  test('start screen displays menu items', async ({ page }, testInfo) => {
     // Check that the start screen has the expected menu items by looking at the PixiJS stage
     const menuItems = await page.evaluate(() => {
       const app = (window as any).__PIXI_APP__;
@@ -44,18 +48,16 @@ test.describe('Menu System', () => {
     expect(menuItems).toContain('Exit');
   });
 
-  test('clicking Options navigates to options screen', async ({ page }) => {
+  test('clicking Options navigates to options screen', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
-    // Options is the second menu item (index 1), positioned at center + 60px spacing
-    const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
-    const optionsY = menuStartY + 60; // Second item with 60px spacing
-
-    await page.mouse.click(centerX, optionsY);
+    // Options: click by text for reliability
+    await clickText(page, 'Options', testInfo, 'click-options');
     await page.waitForTimeout(500);
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(state?.gss_screen).toBe('OptionsScreen');
 
     // Check that we're now on the options screen
     const texts = await page.evaluate(() => {
@@ -85,22 +87,20 @@ test.describe('Menu System', () => {
     expect(texts).not.toContain('Start Game');
   });
 
-  test('clicking Back from Options returns to start screen', async ({ page }) => {
+  test('clicking Back from Options returns to start screen', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
-    const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
-
-    // First, go to Options (second menu item)
-    await page.mouse.click(centerX, menuStartY + 60);
+    // First, go to Options
+    await clickText(page, 'Options', testInfo, 'click-options');
     await page.waitForTimeout(500);
 
-    // Now click Back (at menu_y + 40 from options screen, since resolution setting was removed)
-    const backY = boundingBox.y + boundingBox.height / 2 + 40;
-    await page.mouse.click(centerX, backY);
+    // Now click Back
+    await clickText(page, 'Back', testInfo, 'click-back');
     await page.waitForTimeout(500);
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(state?.gss_screen).toBe('StartScreen');
 
     // Check that we're back on the start screen
     const texts = await page.evaluate(() => {
@@ -129,7 +129,7 @@ test.describe('Menu System', () => {
     expect(texts).toContain('Options');
   });
 
-  test('clicking Start Game navigates to game screen', async ({ page }) => {
+  test('clicking Start Game navigates to game screen', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
@@ -173,15 +173,13 @@ test.describe('Menu System', () => {
     expect(texts).not.toContain('Start Game');
   });
 
-  test('game screen has Menu button', async ({ page }) => {
+  test('game screen has Menu button', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
     // Navigate to game screen
-    const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
-    await page.mouse.click(centerX, menuStartY);
+    await clickText(page, 'Start Game', testInfo, 'click-start-game');
     await page.waitForTimeout(1000);
 
     // Check that Menu button exists
@@ -207,22 +205,22 @@ test.describe('Menu System', () => {
     expect(texts).toContain('Menu');
   });
 
-  test('clicking Menu button shows pause menu', async ({ page }) => {
+  test('clicking Menu button shows pause menu', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
     const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
 
     // Navigate to game screen
-    await page.mouse.click(centerX, menuStartY);
+    await clickText(page, 'Start Game', testInfo, 'click-start-game');
     await page.waitForTimeout(1000);
 
-    // Click Menu button (at height - 80)
-    const menuButtonY = boundingBox.y + boundingBox.height - 80;
-    await page.mouse.click(centerX, menuButtonY);
+    // Click Menu button
+    await clickText(page, 'Menu', testInfo, 'click-menu');
     await page.waitForTimeout(500);
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(state?.gss_screen).toBe('PauseScreen');
 
     // Check that pause menu is shown
     const texts = await page.evaluate(() => {
@@ -252,27 +250,26 @@ test.describe('Menu System', () => {
     expect(texts).not.toContain('Framerate:');
   });
 
-  test('clicking Continue returns to game', async ({ page }) => {
+  test('clicking Continue returns to game', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
     const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
 
     // Navigate to game screen
-    await page.mouse.click(centerX, menuStartY);
+    await clickText(page, 'Start Game', testInfo, 'click-start-game');
     await page.waitForTimeout(1000);
 
     // Click Menu button
-    const menuButtonY = boundingBox.y + boundingBox.height - 80;
-    await page.mouse.click(centerX, menuButtonY);
+    await clickText(page, 'Menu', testInfo, 'click-menu');
     await page.waitForTimeout(500);
 
     // Click Continue (first menu item, pause menu is at screen_height/2)
-    const pauseMenuY = boundingBox.y + boundingBox.height / 2;
-    await page.mouse.click(centerX, pauseMenuY);
+    await clickText(page, 'Continue', testInfo, 'click-continue');
     await page.waitForTimeout(1000);
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(state?.gss_screen).toBe('GameScreen');
 
     // Check that we're back on the game screen
     const texts = await page.evaluate(() => {
@@ -301,33 +298,70 @@ test.describe('Menu System', () => {
     expect(texts).not.toContain('Paused');
   });
 
-  test('clicking Quit returns to start screen and resets game', async ({ page }) => {
+  test('clicking Quit returns to start screen and resets game', async ({ page }, testInfo) => {
     const canvas = await page.locator('canvas');
     const boundingBox = await canvas.boundingBox();
     if (!boundingBox) throw new Error('Canvas has no bounding box');
 
     const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuStartY = boundingBox.y + boundingBox.height / 2;
 
     // Navigate to game screen
-    await page.mouse.click(centerX, menuStartY);
-    await page.waitForTimeout(1000);
+    await clickText(page, 'Start Game', testInfo, 'click-start-game');
+    await page.waitForTimeout(2000); // Wait for game screen and hand to render
 
-    // Click Roll button to change score
-    const rollButtonY = boundingBox.y + boundingBox.height - 150;
-    await page.mouse.click(centerX, rollButtonY);
-    await page.waitForTimeout(2500); // Wait for dice animation to complete (fixed 2 seconds)
+    // Check GAMESTATE to confirm we're on the game screen
+    let state = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(state?.gss_screen).toBe('GameScreen');
 
-    // Click Menu button
-    const menuButtonY = boundingBox.y + boundingBox.height - 80;
-    await page.mouse.click(centerX, menuButtonY);
+    // Helper to dismiss round complete dialogs and return to game screen
+    const dismissRoundCompleteIfNeeded = async () => {
+      const getScreenTexts = async () => {
+        return await page.evaluate(() => {
+          const app = (window as any).__PIXI_APP__;
+          if (!app?.stage?.children) return [];
+          const texts: string[] = [];
+          const findTexts = (container: any) => {
+            if (container.text) texts.push(container.text);
+            if (container.children) for (const child of container.children) findTexts(child);
+          };
+          findTexts(app.stage);
+          return texts;
+        });
+      };
+
+      // Check for round complete dialog
+      let screenTexts = await getScreenTexts();
+      if (screenTexts.some(t => t.includes('Complete!'))) {
+        await clickText(page, 'Skip', testInfo, 'click-skip');
+        await page.waitForTimeout(500);
+        // Re-check screen texts after clicking Skip
+        screenTexts = await getScreenTexts();
+      }
+
+      // If in shop, click Next Round to return to game
+      if (screenTexts.some(t => t === 'SHOP')) {
+        await clickText(page, 'Next Round', testInfo, 'click-next-round');
+        await page.waitForTimeout(1000);
+      }
+    };
+
+    // Select 1 die and roll to change score - use 1 to minimize chance of completing round
+    await selectDiceAndRoll(page, boundingBox, 1);
+
+    // Dismiss any round complete dialogs
+    await dismissRoundCompleteIfNeeded();
+
+    // Now we should be on game screen - click Menu button
+    await clickText(page, 'Menu', testInfo, 'click-menu');
     await page.waitForTimeout(500);
+    await waitForText(page, 'Quit', 4000);
 
-    // Click Quit (second menu item in pause menu at screen_height/2 + 60)
-    const pauseMenuY = boundingBox.y + boundingBox.height / 2;
-    const quitY = pauseMenuY + 60;
-    await page.mouse.click(centerX, quitY);
+    // Click Quit (pause menu)
+    await clickText(page, 'Quit', testInfo, 'click-quit');
     await page.waitForTimeout(500);
+    const stateAfterQuit = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(stateAfterQuit?.gss_screen).toBe('StartScreen');
+    expect(stateAfterQuit?.gss_score).toBe(0);
 
     // Check that we're back on the start screen
     const texts = await page.evaluate(() => {
@@ -355,8 +389,10 @@ test.describe('Menu System', () => {
     expect(texts).toContain('Start Game');
 
     // Now start a new game and verify score is reset
-    await page.mouse.click(centerX, menuStartY);
+    await clickText(page, 'Start Game', testInfo, 'click-restart');
     await page.waitForTimeout(1000);
+    const stateAfterRestart = await page.evaluate(() => (window as any).GAMESTATE);
+    expect(stateAfterRestart?.gss_screen).toBe('GameScreen');
 
     const gameTexts = await page.evaluate(() => {
       const app = (window as any).__PIXI_APP__;

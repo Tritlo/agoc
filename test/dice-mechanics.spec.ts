@@ -1,64 +1,57 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
+import { navigateToGame, selectDiceAndRoll, getEntropyText, getDeckText, getSelectionText, isChoiceDialogVisible, isGameOverVisible, getAllTexts, clickText } from './test-helpers';
 
 test.describe('Dice Mechanics', () => {
-  // Helper function to navigate to game screen
-  async function navigateToGame(page: any) {
-    await page.goto('/');
-    const canvas = await page.waitForSelector('canvas', { timeout: 8000 });
-    await page.waitForTimeout(5000); // Wait for spritesheet
+  test('displays entropy and deck counts', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
-    const boundingBox = await canvas.boundingBox();
-    if (!boundingBox) throw new Error('Canvas has no bounding box');
+    // Check for entropy text
+    const entropyText = await getEntropyText(page);
+    console.log('Entropy text:', entropyText);
+    expect(entropyText).toContain('Entropy:');
+    expect(entropyText).toMatch(/Entropy: 4/); // Starts at 4 (currency)
 
-    const centerX = boundingBox.x + boundingBox.width / 2;
-    const menuY = boundingBox.y + boundingBox.height / 2;
-    await page.mouse.click(centerX, menuY);
-    await page.waitForTimeout(1500);
+    // Check for deck counts
+    const deckText = await getDeckText(page);
+    console.log('Deck text:', deckText);
+    expect(deckText).toContain('Bag:');
+    expect(deckText).toContain('Discard:');
+  });
 
-    return { canvas, boundingBox };
-  }
+  test('hand is populated with dice to select', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
-  test('displays dice count showing additive and multiplicative dice', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
-
-    // Check for dice count text
-    const diceCountText = await page.evaluate(() => {
+    // Check that hand dice are present by looking for clickable dice containers
+    const diceCount = await page.evaluate(() => {
       const app = (window as any).__PIXI_APP__;
-      if (!app?.stage?.children) return null;
+      if (!app?.stage?.children) return 0;
 
-      const findDiceCount = (container: any): string | null => {
-        if (container.text && container.text.includes('additive')) {
-          return container.text;
+      let count = 0;
+      const findClickableDice = (container: any) => {
+        // Die containers have eventMode 'static' and cursor 'pointer'
+        if (container.eventMode === 'static' && container.cursor === 'pointer') {
+          count++;
         }
         if (container.children) {
           for (const child of container.children) {
-            const result = findDiceCount(child);
-            if (result) return result;
+            findClickableDice(child);
           }
         }
-        return null;
       };
-      return findDiceCount(app.stage);
+      findClickableDice(app.stage);
+      return count;
     });
 
-    console.log('Dice count text:', diceCountText);
-    expect(diceCountText).toContain('additive');
-    expect(diceCountText).toContain('multiply');
-    // Should start with 1 additive, 0 multiplicative
-    expect(diceCountText).toMatch(/1 additive/);
-    expect(diceCountText).toMatch(/0 multiply/);
+    console.log('Clickable dice count:', diceCount);
+    // Should have 8 dice in hand (fixed draw of 8)
+    expect(diceCount).toBeGreaterThanOrEqual(8);
   });
 
-  test('dice persist on screen after animation completes', async ({ page }) => {
-    const { canvas, boundingBox } = await navigateToGame(page);
+  test('dice persist on screen after animation completes', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
 
-    // Click roll
-    const clickX = boundingBox.x + boundingBox.width / 2;
-    const clickY = boundingBox.y + boundingBox.height - 150;
-    await page.mouse.click(clickX, clickY);
-
-    // Wait for animation to complete
-    await page.waitForTimeout(3000);
+    // Select dice and roll
+    await selectDiceAndRoll(page, boundingBox, 2);
 
     // Check that there are AnimatedSprites still on screen
     const spriteCount = await page.evaluate(() => {
@@ -85,108 +78,141 @@ test.describe('Dice Mechanics', () => {
     expect(spriteCount).toBeGreaterThanOrEqual(1);
   });
 
-  test('choice dialog appears when target reached', async ({ page }) => {
-    test.setTimeout(60000); // 60 second timeout
+  test('clicking dice in hand selects them', async ({ page }, testInfo) => {
+    const { canvas, boundingBox } = await navigateToGame(page, testInfo);
+
+    // Find dice positions (filter to only hand area at bottom of screen)
+    const dicePositions = await page.evaluate(() => {
+      const app = (window as any).__PIXI_APP__;
+      if (!app?.stage?.children) return [];
+
+      const positions: {x: number, y: number}[] = [];
+      const findHandDice = (container: any): void => {
+        if (container.eventMode === 'static' && container.cursor === 'pointer') {
+          const globalPos = container.getGlobalPosition ? container.getGlobalPosition() : null;
+          // Filter to hand area (approx bottom strip)
+          if (globalPos && globalPos.y > 350 && globalPos.y < 550) {
+            positions.push({ x: globalPos.x, y: globalPos.y });
+          }
+        }
+        if (container.children) {
+          for (const child of container.children) {
+            findHandDice(child);
+          }
+        }
+      };
+      findHandDice(app.stage);
+      return positions;
+    });
+
+    console.log('Found dice positions:', dicePositions);
+    expect(dicePositions.length).toBeGreaterThan(0);
+
+    // Click on first die
+    const firstDie = dicePositions[0];
+    await page.mouse.click(firstDie.x, firstDie.y);
+    await page.waitForTimeout(200);
+
+    // Check selection text
+    const selectionText = await getSelectionText(page);
+    console.log('Selection text after click:', selectionText);
+    expect(selectionText).toContain('Selected:');
+    expect(selectionText).toMatch(/Selected: 1/);
+
+    const state = await page.evaluate(() => (window as any).GAMESTATE);
+    const sel = state?.gss_selection?.ss_selected;
+    const selCount = Array.isArray(sel) ? sel.length : (sel ? Object.keys(sel).length : 0);
+    expect(selCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test('blind complete or game over appears after rolling', async ({ page }) => {
+    test.setTimeout(120000); // 2 minute timeout
     const { canvas, boundingBox } = await navigateToGame(page);
 
-    const clickX = boundingBox.x + boundingBox.width / 2;
-    const clickY = boundingBox.y + boundingBox.height - 150;
+    // Keep rolling until blind complete or game over (max 4 rolls per blind)
+    let blindComplete = false;
+    let gameOver = false;
+    for (let i = 0; i < 20 && !blindComplete && !gameOver; i++) {
+      // Select 5 dice (max) to maximize score chance
+      await selectDiceAndRoll(page, boundingBox, 5);
+      await page.waitForTimeout(500);
 
-    // Keep rolling until score reaches target or we hit a limit
-    let dialogFound = false;
-    for (let i = 0; i < 20 && !dialogFound; i++) {
-      await page.mouse.click(clickX, clickY);
-      await page.waitForTimeout(3000);
+      blindComplete = await isChoiceDialogVisible(page);
+      gameOver = await isGameOverVisible(page);
 
-      // Check for choice dialog
-      dialogFound = await page.evaluate(() => {
-        const app = (window as any).__PIXI_APP__;
-        if (!app?.stage?.children) return false;
-
-        const findDialogText = (container: any): boolean => {
-          if (container.text && container.text.includes('Target Reached')) {
-            return true;
-          }
-          if (container.children) {
-            for (const child of container.children) {
-              if (findDialogText(child)) return true;
-            }
-          }
-          return false;
-        };
-        return findDialogText(app.stage);
-      });
-
-      if (dialogFound) {
-        console.log('Choice dialog found after', i + 1, 'rolls');
+      if (blindComplete) {
+        console.log('Blind complete dialog found after', i + 1, 'rolls');
+        break;
+      }
+      if (gameOver) {
+        console.log('Game over dialog found after', i + 1, 'rolls');
         break;
       }
     }
 
-    expect(dialogFound).toBe(true);
+    // Either blind complete or game over should appear
+    expect(blindComplete || gameOver).toBe(true);
   });
 
-  test('clicking additive button in choice dialog increases additive dice', async ({ page }) => {
-    test.setTimeout(60000);
+  test('completing blind awards entropy and progresses to next blind', async ({ page }) => {
+    test.setTimeout(120000);
     const { canvas, boundingBox } = await navigateToGame(page);
 
-    const clickX = boundingBox.x + boundingBox.width / 2;
-    const clickY = boundingBox.y + boundingBox.height - 150;
+    // Keep rolling until blind complete (max 4 rolls per blind, select 5 dice for max score)
+    let blindComplete = false;
+    let gameOver = false;
+    for (let i = 0; i < 20 && !blindComplete && !gameOver; i++) {
+      await selectDiceAndRoll(page, boundingBox, 5);
+      await page.waitForTimeout(500);
 
-    // Keep rolling until dialog appears
-    let dialogFound = false;
-    for (let i = 0; i < 20 && !dialogFound; i++) {
-      await page.mouse.click(clickX, clickY);
-      await page.waitForTimeout(3000);
-
-      dialogFound = await page.evaluate(() => {
-        const app = (window as any).__PIXI_APP__;
-        if (!app?.stage?.children) return false;
-
-        const findDialogText = (container: any): boolean => {
-          if (container.text && container.text.includes('Target Reached')) {
-            return true;
-          }
-          if (container.children) {
-            for (const child of container.children) {
-              if (findDialogText(child)) return true;
-            }
-          }
-          return false;
-        };
-        return findDialogText(app.stage);
-      });
+      blindComplete = await isChoiceDialogVisible(page);
+      gameOver = await isGameOverVisible(page);
     }
 
-    expect(dialogFound).toBe(true);
+    // Skip test if game over (score wasn't high enough)
+    if (gameOver) {
+      console.log('Game over - skipping entropy progression test');
+      test.skip();
+      return;
+    }
 
-    // Click the additive button (left button in dialog)
-    const dialogLeftX = boundingBox.x + boundingBox.width / 2 - 95; // Left button position
-    const dialogButtonY = boundingBox.y + boundingBox.height / 2 + 30; // Button Y position
-    await page.mouse.click(dialogLeftX, dialogButtonY);
+    expect(blindComplete).toBe(true);
+
+    // When round completes, entropy is awarded (was 4 starting, now should be > 4)
+    const entropyOnComplete = await getEntropyText(page);
+    console.log('Entropy when blind complete:', entropyOnComplete);
+    const entropyVal = entropyOnComplete ? parseInt(entropyOnComplete.replace(/\D+/g, ''), 10) : 0;
+    // Entropy should have increased from starting value of 4 (round 1 reward is 4)
+    expect(entropyVal).toBeGreaterThan(4);
+
+    const centerX = boundingBox.x + boundingBox.width / 2;
+
+    // Die choice screen appears first - click Skip to go to shop
+    const dieChoiceTexts = await getAllTexts(page);
+    console.log('Die choice screen texts:', dieChoiceTexts);
+    expect(dieChoiceTexts.some(t => t.includes('Complete!'))).toBe(true);
+    expect(dieChoiceTexts.some(t => t === 'Skip')).toBe(true);
+
+    // Click Skip button (uses text-based click)
+    await clickText(page, 'Skip');
     await page.waitForTimeout(500);
 
-    // Check dice count updated
-    const diceCountText = await page.evaluate(() => {
-      const app = (window as any).__PIXI_APP__;
-      if (!app?.stage?.children) return null;
+    // Verify shop is showing
+    const shopTexts = await getAllTexts(page);
+    console.log('Shop texts:', shopTexts);
+    expect(shopTexts.some(t => t === 'SHOP')).toBe(true);
+    expect(shopTexts.some(t => t === 'Next Round')).toBe(true);
 
-      const findDiceCount = (container: any): string | null => {
-        if (container.text && container.text.includes('additive')) {
-          return container.text;
-        }
-        if (container.children) {
-          for (const child of container.children) {
-            const result = findDiceCount(child);
-            if (result) return result;
-          }
-        }
-        return null;
-      };
-      return findDiceCount(app.stage);
-    });
+    // Click Next Round to go to next round
+    await clickText(page, 'Next Round');
+    await page.waitForTimeout(1000);
 
-    console.log('Dice count after additive choice:', diceCountText);
-    expect(diceCountText).toMatch(/2 additive/);
+    // Check that we progressed to next round by verifying:
+    // - Score reset to 0
+    // - Target increased (round 2 target is 30)
+    const allTexts = await getAllTexts(page);
+    console.log('All texts after shop:', allTexts);
+    expect(allTexts.some(t => t === 'Score: 0')).toBe(true);
+    expect(allTexts.some(t => t === 'Target: 30')).toBe(true); // Round 2 target
   });
 });

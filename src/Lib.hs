@@ -33,10 +33,21 @@ module Lib
     , generateDiceSpritesheet
     , getAnimationFrames
     , newAnimatedSpriteFromJSArray
+      -- * Viewport/Window
+    , getWindowWidth
+    , getWindowHeight
+    , onWindowResize
+      -- * Game state persistence
+    , getState
+    , setState
     ) where
 
 import GHC.Wasm.Prim
+import Graphics.PixiJS (fromJSString, toJSString)
 import Graphics.PixiJS.Interop () -- For IsString JSString instance
+import Game.State (GameSnapshot)
+import Data.Aeson (decode, encode)
+import qualified Data.ByteString.Lazy.Char8 as LBS8
 
 -- *****************************************************************************
 -- * Sound Effects
@@ -934,3 +945,49 @@ foreign import javascript unsafe
 -- This bypasses the Haskell list conversion issue.
 foreign import javascript unsafe "new PIXI.AnimatedSprite($1)"
     newAnimatedSpriteFromJSArray :: JSVal -> IO JSVal
+
+-- *****************************************************************************
+-- * Viewport/Window Management
+-- *****************************************************************************
+
+-- | Get the current window inner width
+foreign import javascript unsafe "window.innerWidth"
+    getWindowWidth :: IO Int
+
+-- | Get the current window inner height
+foreign import javascript unsafe "window.innerHeight"
+    getWindowHeight :: IO Int
+
+-- | Register a callback for window resize events.
+foreign import javascript safe
+  """
+  (() => {
+    window.addEventListener('resize', () => {
+      $1();
+    });
+  })()
+  """
+    onWindowResize :: JSVal -> IO ()
+
+-- *****************************************************************************
+-- * Global Game State (window.GAMESTATE)
+-- *****************************************************************************
+
+foreign import javascript unsafe "window.GAMESTATE = JSON.parse($1);"
+    js_setState :: JSString -> IO ()
+
+foreign import javascript unsafe "return window.GAMESTATE ? JSON.stringify(window.GAMESTATE) : \"\";"
+    js_getState :: IO JSString
+
+-- | Persist the current snapshot into `window.GAMESTATE`.
+setState :: GameSnapshot -> IO ()
+setState snap = js_setState $ toJSString (LBS8.unpack (encode snap))
+
+-- | Read the snapshot from `window.GAMESTATE`.
+getState :: IO (Maybe GameSnapshot)
+getState = do
+    raw <- js_getState
+    let txt = fromJSString raw
+    if null txt
+        then pure Nothing
+        else pure (decode (LBS8.pack txt))
